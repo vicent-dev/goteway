@@ -1,6 +1,7 @@
 package app
 
 import (
+	"context"
 	"net/http"
 	"time"
 
@@ -20,8 +21,8 @@ func (s *server) routes() {
 		s.writeResponse(w, response)
 
 		go func() {
-			time.Sleep(time.Minute)
-			alog.Info("log after response")
+			s.rdb.Set(context.TODO(), "request_"+time.Now().String(), response, time.Minute)
+			alog.Info("redis cache after response")
 		}()
 
 	}).Methods("GET")

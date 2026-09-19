@@ -12,6 +12,10 @@ type config struct {
 		Host string `yaml:"host"`
 		Port string `yaml:"port"`
 	} `yaml:"server"`
+	Redis struct {
+		Host string `yaml:"host"`
+		Port string `yaml:"port"`
+	} `yaml:"redis"`
 }
 
 func loadConfig() *config {

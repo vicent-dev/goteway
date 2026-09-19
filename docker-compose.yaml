@@ -6,6 +6,17 @@ services:
       - 8080:8080
     networks:
       - goteway
+    depends_on:
+      redis:
+        condition: service_healthy
+  redis:
+    image: redis:8-alpine
+    container_name: redis
+    networks:
+      - goteway
+    ports:
+      - 6379:6379
+    restart: unless-stopped
 
 networks:
   goteway:

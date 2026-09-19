@@ -6,11 +6,13 @@ import (
 
 	"github.com/gorilla/handlers"
 	"github.com/gorilla/mux"
+	"github.com/redis/go-redis/v9"
 )
 
 type server struct {
-	r *mux.Router
-	c *config
+	r   *mux.Router
+	c   *config
+	rdb *redis.Client
 }
 
 func NewServer() *server {
@@ -20,6 +22,7 @@ func NewServer() *server {
 		r: mux.NewRouter(),
 	}
 
+	s.redis()
 	s.routes()
 
 	return &s
