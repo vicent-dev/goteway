@@ -6,18 +6,13 @@ require (
 	github.com/en-vee/alog v0.0.0-20240405223040-168272df9baf
 	github.com/gorilla/handlers v1.5.2
 	github.com/gorilla/mux v1.8.1
-	github.com/rabbitmq/amqp091-go v1.15.0
 	gopkg.in/yaml.v2 v2.4.0
-	gorm.io/driver/mysql v1.6.0
-	gorm.io/gorm v1.31.2
 )
 
 require (
-	filippo.io/edwards25519 v1.2.0 // indirect
 	github.com/en-vee/aconf v0.0.0-20190302084711-a3ed365b7cff // indirect
 	github.com/felixge/httpsnoop v1.1.0 // indirect
-	github.com/go-sql-driver/mysql v1.10.1 // indirect
-	github.com/jinzhu/inflection v1.0.0 // indirect
-	github.com/jinzhu/now v1.1.5 // indirect
-	golang.org/x/text v0.42.0 // indirect
+	github.com/kr/pretty v0.3.1 // indirect
+	github.com/rogpeppe/go-internal v1.14.1 // indirect
+	gopkg.in/check.v1 v1.0.0-20190902080502-41f04d3bba15 // indirect
 )

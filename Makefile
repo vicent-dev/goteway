@@ -4,6 +4,8 @@ run:
 build:
 	go build ./cmd/server/main.go
 
+
+# install go install github.com/cespare/reflex@latest
 watch:
-	ulimit -n 1000 #increase the file watch limit, might required on MacOS
+	ulimit -n 1000 
 	reflex -s -r '\.go$$' make run
