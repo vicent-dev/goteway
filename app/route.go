@@ -10,7 +10,7 @@ func (s *server) routes() {
 	s.r.Use(loggingMiddleware)
 	s.r.Use(jsonMiddleware)
 
-	cache := cache.NewRedis(s.rdb)
+	cache := cache.NewRedis[*request.Request](s.rdb)
 	client := request.NewClient(&cache)
 
 	//ping example
@@ -19,6 +19,7 @@ func (s *server) routes() {
 		response["ping"] = "pong pong"
 
 		client.Request(w, r)
+
 		s.writeResponse(w, response)
 
 	}).Methods("GET")

@@ -18,7 +18,7 @@ func NewRequest(r *http.Request) *Request {
 	return &Request{r, ""}
 }
 
-func (r *Request) hashKey() string {
+func (r Request) HashKey() string {
 	var buf bytes.Buffer
 	encoder := base64.NewEncoder(base64.StdEncoding, &buf)
 	defer encoder.Close()
@@ -32,11 +32,11 @@ func (r *Request) hashKey() string {
 	return buf.String()
 }
 
-func (r *Request) base64Value() string {
+func (r *Request) Base64Value() string {
 	return base64.StdEncoding.EncodeToString([]byte(r.response))
 }
 
-func (r *Request) setValueBase64(s string) {
+func (r *Request) SetValueFromBase64(s string) {
 	data, err := base64.StdEncoding.DecodeString(s)
 
 	if err != nil {
@@ -46,6 +46,6 @@ func (r *Request) setValueBase64(s string) {
 	r.response = string(data)
 }
 
-func (r *Request) value() string {
+func (r *Request) Value() string {
 	return r.response
 }

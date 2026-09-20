@@ -6,10 +6,10 @@ import (
 )
 
 type Client struct {
-	cache *cache.Cache
+	cache *cache.Cache[*Request]
 }
 
-func NewClient(c *cache.Cache) *Client {
+func NewClient(c *cache.Cache[*Request]) *Client {
 	return &Client{c}
 }
 

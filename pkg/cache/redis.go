@@ -7,23 +7,23 @@ import (
 	"github.com/redis/go-redis/v9"
 )
 
-type Redis struct {
+type Redis[T Cacheable] struct {
 	rdb *redis.Client
 	ttl time.Duration
 }
 
-func NewRedis(rdb *redis.Client) Cache {
-	return &Redis{rdb, time.Minute}
+func NewRedis[T Cacheable](rdb *redis.Client) Cache[T] {
+	return &Redis[T]{rdb, time.Minute}
 }
 
-func (r *Redis) Set(ca Cacheable) {
-	r.rdb.Set(context.Background(), ca.hashKey(), ca.base64Value(), r.ttl)
+func (r *Redis[T]) Set(t T) {
+	r.rdb.Set(context.Background(), t.HashKey(), t.Base64Value(), r.ttl)
 }
 
-func (r *Redis) Get(ca Cacheable) *Cacheable {
-	s := r.rdb.Get(context.Background(), ca.hashKey())
+func (r *Redis[T]) Get(t T) *T {
+	s := r.rdb.Get(context.Background(), t.HashKey())
 
-	ca.setValueBase64(s.Val())
+	t.SetValueFromBase64(s.Val())
 
-	return nil
+	return &t
 }
