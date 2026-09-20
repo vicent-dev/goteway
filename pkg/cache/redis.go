@@ -21,13 +21,14 @@ func (r *Redis[T]) Set(t T) {
 }
 
 func (r *Redis[T]) Get(t T) *T {
-	s := r.rdb.Get(context.Background(), t.HashKey())
+	val, err := r.rdb.Get(context.Background(), t.HashKey()).Result()
 
-	if s.Val() == "" {
+	// key not found
+	if err != nil {
 		return nil
 	}
 
-	t.SetValueFromBase64(s.Val())
+	t.SetValueFromBase64(val)
 
 	return &t
 }

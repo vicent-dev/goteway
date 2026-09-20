@@ -13,14 +13,29 @@ func (s *server) routes() {
 	cache := cache.NewRedis[*request.Request](s.rdb)
 	client := request.NewClient(&cache)
 
-	//ping example
-	s.r.HandleFunc("/ping", func(w http.ResponseWriter, r *http.Request) {
+	// auth handler
+	authR := s.r.PathPrefix("/auth").Subrouter()
+
+	authR.PathPrefix("/login").HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		response := make(map[string]any)
-		response["ping"] = "pong pong"
+		response[""] = "login"
+
+		s.writeResponse(w, response)
+	}).Methods("POST")
+
+	authR.PathPrefix("/logout").HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		response := make(map[string]any)
+		response[""] = "logout"
+
+		s.writeResponse(w, response)
+	}).Methods("POST")
+
+	// default router handler
+	s.r.PathPrefix("/").HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		response := make(map[string]any)
 
 		client.Request(w, r)
 
 		s.writeResponse(w, response)
-
-	}).Methods("GET")
+	})
 }

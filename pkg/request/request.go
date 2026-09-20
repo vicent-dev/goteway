@@ -4,14 +4,15 @@ import (
 	"bytes"
 	"encoding/base64"
 	"encoding/json"
+	"fmt"
 	"net/http"
 
 	"github.com/en-vee/alog"
 )
 
 type Request struct {
-	r        *http.Request
-	response string
+	HttpRequest  *http.Request
+	HttpResponse string
 }
 
 func NewRequest(r *http.Request) *Request {
@@ -22,7 +23,23 @@ func (r Request) HashKey() string {
 	var buf bytes.Buffer
 	encoder := base64.NewEncoder(base64.StdEncoding, &buf)
 	defer encoder.Close()
-	err := json.NewEncoder(encoder).Encode(r)
+
+	var body []byte
+	r.HttpRequest.Body.Read(body)
+
+	encodeKey := struct {
+		Url    any
+		Header any
+		Body   any
+		Method any
+	}{
+		r.HttpRequest.URL,
+		r.HttpRequest.Header,
+		body,
+		r.HttpRequest.Method,
+	}
+
+	err := json.NewEncoder(encoder).Encode(fmt.Sprintf("%v", encodeKey))
 
 	if err != nil {
 		alog.Error(err.Error(), r)
@@ -33,7 +50,7 @@ func (r Request) HashKey() string {
 }
 
 func (r *Request) Base64Value() string {
-	return base64.StdEncoding.EncodeToString([]byte(r.response))
+	return base64.StdEncoding.EncodeToString([]byte(r.HttpResponse))
 }
 
 func (r *Request) SetValueFromBase64(s string) {
@@ -43,9 +60,9 @@ func (r *Request) SetValueFromBase64(s string) {
 		alog.Error(err.Error())
 	}
 
-	r.response = string(data)
+	r.HttpResponse = string(data)
 }
 
 func (r *Request) Value() string {
-	return r.response
+	return r.HttpResponse
 }
