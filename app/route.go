@@ -1,29 +1,25 @@
 package app
 
 import (
-	"context"
+	"goteway/pkg/cache"
+	"goteway/pkg/request"
 	"net/http"
-	"time"
-
-	"github.com/en-vee/alog"
 )
 
 func (s *server) routes() {
 	s.r.Use(loggingMiddleware)
 	s.r.Use(jsonMiddleware)
 
+	cache := cache.NewRedis(s.rdb)
+	client := request.NewClient(&cache)
+
 	//ping example
 	s.r.HandleFunc("/ping", func(w http.ResponseWriter, r *http.Request) {
 		response := make(map[string]any)
 		response["ping"] = "pong pong"
 
-		alog.Info("log before response")
+		client.Request(w, r)
 		s.writeResponse(w, response)
-
-		go func() {
-			s.rdb.Set(context.TODO(), "request_"+time.Now().String(), response, time.Minute)
-			alog.Info("redis cache after response")
-		}()
 
 	}).Methods("GET")
 }
