@@ -24,6 +24,8 @@ func (c *Client) Request(httpW http.ResponseWriter, httpR *http.Request) {
 
 	// http request if not found and async cache
 
+	// set same body, headers as internal request
+
 	go func(req *Request) {
 		(*c.cache).Set(req)
 	}(request)

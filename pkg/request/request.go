@@ -12,11 +12,11 @@ import (
 
 type Request struct {
 	HttpRequest  *http.Request
-	HttpResponse string
+	HttpResponse []byte
 }
 
 func NewRequest(r *http.Request) *Request {
-	return &Request{r, ""}
+	return &Request{r, []byte{}}
 }
 
 func (r Request) HashKey() string {
@@ -50,7 +50,7 @@ func (r Request) HashKey() string {
 }
 
 func (r *Request) Base64Value() string {
-	return base64.StdEncoding.EncodeToString([]byte(r.HttpResponse))
+	return base64.StdEncoding.EncodeToString(r.HttpResponse)
 }
 
 func (r *Request) SetValueFromBase64(s string) {
@@ -60,9 +60,9 @@ func (r *Request) SetValueFromBase64(s string) {
 		alog.Error(err.Error())
 	}
 
-	r.HttpResponse = string(data)
+	r.HttpResponse = data
 }
 
 func (r *Request) Value() string {
-	return r.HttpResponse
+	return string(r.HttpResponse)
 }
