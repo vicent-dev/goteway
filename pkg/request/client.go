@@ -14,12 +14,17 @@ func NewClient(c *cache.Cache[*Request]) *Client {
 }
 
 func (c *Client) Request(httpW http.ResponseWriter, httpR *http.Request) {
-	_ = NewRequest(httpR)
+	request := NewRequest(httpR)
 
 	// get response from cache
-
-	// return if found
+	if (*c.cache).Get(request) != nil {
+		// set response
+		return
+	}
 
 	// http request if not found and async cache
 
+	go func(req *Request) {
+		(*c.cache).Set(req)
+	}(request)
 }

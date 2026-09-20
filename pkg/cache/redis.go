@@ -23,6 +23,10 @@ func (r *Redis[T]) Set(t T) {
 func (r *Redis[T]) Get(t T) *T {
 	s := r.rdb.Get(context.Background(), t.HashKey())
 
+	if s.Val() == "" {
+		return nil
+	}
+
 	t.SetValueFromBase64(s.Val())
 
 	return &t
