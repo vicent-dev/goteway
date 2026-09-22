@@ -4,19 +4,74 @@ import (
 	"bytes"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"io"
 	"net/http"
+	"regexp"
+	"strings"
 
 	"github.com/en-vee/alog"
 )
 
+// @todo refactor to be petition/call and store request + response from gateway call and for internal call
 type Request struct {
 	HttpRequest  *http.Request
 	HttpResponse []byte
+
+	IsInternal bool
+
+	ConvertedRequest string
+	Method           string
+	Body             io.Reader
 }
 
-func NewRequest(r *http.Request) *Request {
-	return &Request{r, []byte{}}
+func NewRequest(r *http.Request, servicesConfig ServicesConfig) (*Request, error) {
+	sc, isInternal := findServiceConfigForUri(r.URL.Path, servicesConfig)
+
+	if sc == nil {
+		return nil, errors.New("service config not found")
+	}
+
+	convertedRequest := strings.Replace(r.URL.Path[1:], sc.Path, sc.Host, -1)
+
+	return &Request{
+		r,
+		[]byte{},
+		isInternal,
+		convertedRequest,
+		r.Method,
+		r.Body,
+	}, nil
+}
+
+func findServiceConfigForUri(uri string, servicesConfig ServicesConfig) (*ServiceConfig, bool) {
+
+	var sc *ServiceConfig
+	isInternal := false
+
+	for _, s := range servicesConfig.External {
+
+		if matched, _ := regexp.MatchString(s.Path+"*", uri); matched {
+			sc = &s
+			break
+		}
+	}
+
+	for _, s := range servicesConfig.Internal {
+
+		if matched, _ := regexp.MatchString(s.Path+"*", uri); matched {
+
+			if sc == nil || (sc != nil && strings.Count(s.Path, "/") > strings.Count(sc.Path, "/")) {
+				isInternal = true
+				sc = &s
+				break
+			}
+
+		}
+	}
+
+	return sc, isInternal
 }
 
 func (r Request) HashKey() string {

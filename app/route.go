@@ -1,6 +1,7 @@
 package app
 
 import (
+	"context"
 	"goteway/pkg/cache"
 	"goteway/pkg/request"
 	"net/http"
@@ -8,7 +9,6 @@ import (
 
 func (s *server) routes() {
 	s.r.Use(loggingMiddleware)
-	s.r.Use(jsonMiddleware)
 
 	// auth handler
 	authR := s.r.PathPrefix("/auth").Subrouter()
@@ -22,14 +22,10 @@ func (s *server) routes() {
 func (s *server) defaultRouteHandler() func(http.ResponseWriter, *http.Request) {
 
 	cache := cache.NewRedis[*request.Request](s.rdb)
-	client := request.NewClient(&cache)
+	client := request.NewClient(&cache, s.c.convertServicesToRequest())
 
 	return func(w http.ResponseWriter, r *http.Request) {
-		response := make(map[string]any)
-
-		client.Request(w, r)
-
-		s.writeResponse(w, response)
+		client.Request(context.Background(), w, r)
 	}
 }
 

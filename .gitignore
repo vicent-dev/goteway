@@ -1,3 +1,4 @@
 static/config.yaml
 build/
 vendor/
+go.sum

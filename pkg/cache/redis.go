@@ -13,7 +13,7 @@ type Redis[T Cacheable] struct {
 }
 
 func NewRedis[T Cacheable](rdb *redis.Client) Cache[T] {
-	return &Redis[T]{rdb, time.Minute}
+	return &Redis[T]{rdb, time.Second * 5}
 }
 
 func (r *Redis[T]) Set(t T) {

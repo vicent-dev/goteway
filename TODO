@@ -1,3 +1,7 @@
 - auth system
 - protected and open paths config
 - security: restart middleware, reate limit, cors
+
+
+
+sigkill graceful stop and services config

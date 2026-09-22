@@ -8,10 +8,8 @@ redis:
 services:
   # auth required
   internal:
-    dumb:
-      path: dumb-service
-      host: dumbservice
+    - path: dumb-service
+      host: localhost:8000
   external:
-    dumber:
-      path: dumb-service 
-      host: dumbservice/external
+    - path: dumb-service 
+      host: localhost:8000/external
