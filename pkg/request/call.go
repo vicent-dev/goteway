@@ -67,6 +67,8 @@ func NewCall(r *http.Request, servicesConfig ServicesConfig) (*Call, error) {
 		return nil, err
 	}
 
+	r.Body = io.NopCloser(bytes.NewBuffer(body))
+
 	return &Call{
 		id:         buf.String(),
 		isInternal: isInternal,
