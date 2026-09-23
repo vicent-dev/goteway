@@ -1,13 +1,12 @@
 package cache
 
 type Cacheable interface {
-	HashKey() string
-	Base64Value() string
-	SetValueFromBase64(string)
+	Key() string
 	Value() string
+	SetValue(string)
 }
 
 type Cache[T Cacheable] interface {
 	Set(T)
-	Get(T) *T
+	Get(T)
 }

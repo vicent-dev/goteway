@@ -1,8 +1,8 @@
 package request
 
 import (
+	"bytes"
 	"context"
-	"fmt"
 	"goteway/pkg/cache"
 	"io"
 	"net/http"
@@ -22,17 +22,17 @@ type ServiceConfig struct {
 }
 
 type Client struct {
-	cache          *cache.Cache[*Request]
+	cache          *cache.Cache[*Call]
 	servicesConfig ServicesConfig
 }
 
-func NewClient(c *cache.Cache[*Request], services ServicesConfig) *Client {
+func NewClient(c *cache.Cache[*Call], services ServicesConfig) *Client {
 	return &Client{c, services}
 }
 
 func (c *Client) Request(ctx context.Context, httpW http.ResponseWriter, httpR *http.Request) {
 
-	request, err := NewRequest(httpR, c.servicesConfig)
+	call, err := NewCall(httpR, c.servicesConfig)
 
 	if err != nil {
 		alog.Error(err.Error())
@@ -40,50 +40,54 @@ func (c *Client) Request(ctx context.Context, httpW http.ResponseWriter, httpR *
 	}
 
 	// get response from cache
-	cacheResponse := (*c.cache).Get(request)
-	if cacheResponse != nil {
-		// @todo build internal response
+	(*c.cache).Get(call)
+	if call.response != nil {
+		alog.Info("Serve response from cache")
+		mapResponseIntoResponseWriter(call.response, httpW)
 		return
 	}
 
 	// http request if not found and async cache
 	internalRequest, err := http.NewRequest(
-		request.Method,
-		request.ConvertedRequest,
-		request.Body,
+		call.request.Method,
+		call.requestUrl,
+		call.request.Body,
 	)
 
 	if err != nil {
 		alog.Error(err.Error())
 		return
 	}
+
 	client := &http.Client{Timeout: 10 * time.Second}
 
-	alog.Info(fmt.Sprintf("Internal request: %v", internalRequest))
-	internalResponse, err := client.Do(internalRequest)
+	call.response, err = client.Do(internalRequest)
 
 	if err != nil {
 		alog.Error(err.Error())
 		return
 	}
 
-	defer internalResponse.Body.Close()
+	mapResponseIntoResponseWriter(call.response, httpW)
 
-	internalBody, _ := io.ReadAll(internalResponse.Body)
+	go func(call *Call) {
+		(*c.cache).Set(call)
+	}(call)
+}
 
-	// @todo refactor to have same logic from cache and from http client
-	// set same body, headers as internal request
-	httpW.WriteHeader(internalResponse.StatusCode)
-	httpW.Write(internalBody)
+func mapResponseIntoResponseWriter(r *http.Response, rw http.ResponseWriter) {
+	body, _ := io.ReadAll(r.Body)
 
-	request.HttpResponse = internalBody
+	defer r.Body.Close()
 
-	alog.Info("Internal body response: " + string(internalBody))
-	for ih, v := range internalResponse.Header {
-		httpW.Header().Set(ih, v[0])
+	for hn, hvs := range r.Header {
+		rw.Header().Del(hn)
+		for _, hv := range hvs {
+			rw.Header().Add(hn, hv)
+		}
 	}
 
-	go func(req *Request) {
-		(*c.cache).Set(req)
-	}(request)
+	rw.Write(body)
+
+	r.Body = io.NopCloser(bytes.NewBuffer(body))
 }

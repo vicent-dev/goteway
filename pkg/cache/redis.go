@@ -13,22 +13,20 @@ type Redis[T Cacheable] struct {
 }
 
 func NewRedis[T Cacheable](rdb *redis.Client) Cache[T] {
-	return &Redis[T]{rdb, time.Second * 5}
+	return &Redis[T]{rdb, time.Second * 15}
 }
 
 func (r *Redis[T]) Set(t T) {
-	r.rdb.Set(context.Background(), t.HashKey(), t.Base64Value(), r.ttl)
+	r.rdb.Set(context.Background(), t.Key(), t.Value(), r.ttl)
 }
 
-func (r *Redis[T]) Get(t T) *T {
-	val, err := r.rdb.Get(context.Background(), t.HashKey()).Result()
+func (r *Redis[T]) Get(t T) {
+	val, err := r.rdb.Get(context.Background(), t.Key()).Result()
 
 	// key not found
 	if err != nil {
-		return nil
+		return
 	}
 
-	t.SetValueFromBase64(val)
-
-	return &t
+	t.SetValue(val)
 }

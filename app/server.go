@@ -62,7 +62,6 @@ func (s *server) Run(ctx context.Context) error {
 	return <-errCh
 }
 
-// @todo remove
 func (s *server) writeResponse(w http.ResponseWriter, response map[string]any) {
 	w.WriteHeader(http.StatusOK)
 
@@ -70,7 +69,6 @@ func (s *server) writeResponse(w http.ResponseWriter, response map[string]any) {
 	_, _ = w.Write(byteResponse)
 }
 
-// @todo remove
 func (s *server) writeErrorResponse(w http.ResponseWriter, response map[string]any, errorCode int) {
 	w.WriteHeader(errorCode)
 	byteResponse, _ := json.Marshal(response)

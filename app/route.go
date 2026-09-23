@@ -12,6 +12,7 @@ func (s *server) routes() {
 
 	// auth handler
 	authR := s.r.PathPrefix("/auth").Subrouter()
+	authR.Use(jsonMiddleware)
 	authR.PathPrefix("/login").HandlerFunc(s.loginHandler()).Methods("POST")
 	authR.PathPrefix("/logout").HandlerFunc(s.logoutHandler()).Methods("POST")
 
@@ -21,7 +22,7 @@ func (s *server) routes() {
 
 func (s *server) defaultRouteHandler() func(http.ResponseWriter, *http.Request) {
 
-	cache := cache.NewRedis[*request.Request](s.rdb)
+	cache := cache.NewRedis[*request.Call](s.rdb)
 	client := request.NewClient(&cache, s.c.convertServicesToRequest())
 
 	return func(w http.ResponseWriter, r *http.Request) {
