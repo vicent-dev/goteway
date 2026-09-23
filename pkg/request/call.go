@@ -45,6 +45,10 @@ func NewCall(r *http.Request, servicesConfig ServicesConfig) (*Call, error) {
 	defer encoder.Close()
 	defer r.Body.Close()
 
+	header := r.Header
+	// @todo check other time based headers
+	header.Del("Date")
+
 	body, _ := io.ReadAll(r.Body)
 
 	encodeKey := struct {
@@ -55,7 +59,7 @@ func NewCall(r *http.Request, servicesConfig ServicesConfig) (*Call, error) {
 		Cookies any
 	}{
 		r.URL,
-		r.Header,
+		header,
 		body,
 		r.Method,
 		r.Cookies(),
@@ -68,6 +72,7 @@ func NewCall(r *http.Request, servicesConfig ServicesConfig) (*Call, error) {
 	}
 
 	r.Body = io.NopCloser(bytes.NewBuffer(body))
+	alog.Info(fmt.Sprintf("[%v] %v -> %v", r.Method, r.URL, string(body)))
 
 	return &Call{
 		id:         buf.String(),
