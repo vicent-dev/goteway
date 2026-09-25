@@ -8,6 +8,7 @@ Gateway made in Go.
 - Redis cache
 - Embed config in a single binary output
 - Microservices simple configuration
+- Gracefull SIGKILL
 
 ```bash 
 # static/config.yaml

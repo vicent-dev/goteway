@@ -14,6 +14,8 @@ func loggingMiddleware(next http.Handler) http.Handler {
 
 		r = r.WithContext(ctx)
 		next.ServeHTTP(w, r)
+
+		log.LogRequest(ctx)
 	})
 }
 

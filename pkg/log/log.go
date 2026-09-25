@@ -23,3 +23,7 @@ func LogWarn(ctx context.Context, l string) {
 func LogInfo(ctx context.Context, l string) {
 	alog.Info(fmt.Sprintf("[%v] - %v: %v", ctx.Value(METHOD_LOG_KEY), ctx.Value(PATH_LOG_KEY), l))
 }
+
+func LogRequest(ctx context.Context) {
+	alog.Info(fmt.Sprintf("[%v] - %v", ctx.Value(METHOD_LOG_KEY), ctx.Value(PATH_LOG_KEY)))
+}
