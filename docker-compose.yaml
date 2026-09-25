@@ -1,6 +1,6 @@
 services:
   app:
-    build: .
+    build: docker/Dockerfile
     container_name: goteway
     ports:
       - 8080:8080
@@ -17,6 +17,5 @@ services:
     ports:
       - 6379:6379
     restart: unless-stopped
-
 networks:
   goteway:

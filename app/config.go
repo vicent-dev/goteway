@@ -1,12 +1,9 @@
 package app
 
 import (
-	"fmt"
 	"goteway/pkg/request"
 	"goteway/static"
-	"log"
 
-	"github.com/en-vee/alog"
 	"gopkg.in/yaml.v2"
 )
 
@@ -57,10 +54,8 @@ func loadConfig() *config {
 	cFile := static.GetConfigFile()
 	err := yaml.Unmarshal(cFile, c)
 
-	alog.Info("config loaded " + fmt.Sprintf("%v", c))
-
 	if err != nil {
-		log.Fatalln(err)
+		panic(err)
 	}
 
 	return c

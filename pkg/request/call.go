@@ -2,16 +2,16 @@ package request
 
 import (
 	"bytes"
+	"context"
 	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"goteway/pkg/log"
 	"io"
 	"net/http"
 	"regexp"
 	"strings"
-
-	"github.com/en-vee/alog"
 )
 
 type serializedResponse struct {
@@ -72,7 +72,6 @@ func NewCall(r *http.Request, servicesConfig ServicesConfig) (*Call, error) {
 	}
 
 	r.Body = io.NopCloser(bytes.NewBuffer(body))
-	alog.Info(fmt.Sprintf("[%v] %v -> %v", r.Method, r.URL, string(body)))
 
 	return &Call{
 		id:         buf.String(),
@@ -133,7 +132,7 @@ func (c *Call) Value() string {
 	v, err := json.Marshal(serialized)
 
 	if err != nil {
-		alog.Error(err.Error())
+		log.LogError(context.Background(), err.Error())
 		return ""
 	}
 
@@ -145,7 +144,7 @@ func (c *Call) SetValue(s string) {
 	err := json.Unmarshal([]byte(s), serialized)
 
 	if err != nil {
-		alog.Error(err.Error())
+		log.LogError(context.Background(), err.Error())
 		return
 	}
 

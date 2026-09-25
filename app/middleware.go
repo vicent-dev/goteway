@@ -1,14 +1,18 @@
 package app
 
 import (
+	"context"
+	"goteway/pkg/log"
 	"net/http"
-
-	"github.com/en-vee/alog"
 )
 
 func loggingMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		alog.Info(r.RequestURI)
+
+		ctx := context.WithValue(r.Context(), log.METHOD_LOG_KEY, r.Method)
+		ctx = context.WithValue(ctx, log.PATH_LOG_KEY, r.URL.Path)
+
+		r = r.WithContext(ctx)
 		next.ServeHTTP(w, r)
 	})
 }

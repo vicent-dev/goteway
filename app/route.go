@@ -1,7 +1,6 @@
 package app
 
 import (
-	"context"
 	"goteway/pkg/cache"
 	"goteway/pkg/request"
 	"net/http"
@@ -26,7 +25,11 @@ func (s *server) defaultRouteHandler() func(http.ResponseWriter, *http.Request) 
 	client := request.NewClient(&cache, s.c.convertServicesToRequest())
 
 	return func(w http.ResponseWriter, r *http.Request) {
-		client.Request(context.Background(), w, r)
+		ctx := r.Context()
+
+		client.Request(ctx, w, r)
+
+		ctx.Done()
 	}
 }
 

@@ -4,11 +4,10 @@ import (
 	"bytes"
 	"context"
 	"goteway/pkg/cache"
+	"goteway/pkg/log"
 	"io"
 	"net/http"
 	"time"
-
-	"github.com/en-vee/alog"
 )
 
 type ServicesConfig struct {
@@ -35,14 +34,14 @@ func (c *Client) Request(ctx context.Context, httpW http.ResponseWriter, httpR *
 	call, err := NewCall(httpR, c.servicesConfig)
 
 	if err != nil {
-		alog.Error(err.Error())
+		log.LogError(ctx, err.Error())
 		return
 	}
 
 	// get response from cache
 	(*c.cache).Get(call)
 	if call.response != nil {
-		alog.Info("Serve response from cache")
+		log.LogInfo(ctx, "Serve response from cache")
 		mapResponseIntoResponseWriter(call.response, httpW)
 		return
 	}
@@ -55,7 +54,7 @@ func (c *Client) Request(ctx context.Context, httpW http.ResponseWriter, httpR *
 	)
 
 	if err != nil {
-		alog.Error(err.Error())
+		log.LogError(ctx, err.Error())
 		return
 	}
 
@@ -64,7 +63,7 @@ func (c *Client) Request(ctx context.Context, httpW http.ResponseWriter, httpR *
 	call.response, err = client.Do(internalRequest)
 
 	if err != nil {
-		alog.Error(err.Error())
+		log.LogError(ctx, err.Error())
 		return
 	}
 
