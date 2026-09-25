@@ -2,7 +2,6 @@ package app
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"log"
 	"net/http"
@@ -60,17 +59,4 @@ func (s *server) Run(ctx context.Context) error {
 	}
 
 	return <-errCh
-}
-
-func (s *server) writeResponse(w http.ResponseWriter, response map[string]any) {
-	w.WriteHeader(http.StatusOK)
-
-	byteResponse, _ := json.Marshal(response)
-	_, _ = w.Write(byteResponse)
-}
-
-func (s *server) writeErrorResponse(w http.ResponseWriter, response map[string]any, errorCode int) {
-	w.WriteHeader(errorCode)
-	byteResponse, _ := json.Marshal(response)
-	_, _ = w.Write(byteResponse)
 }

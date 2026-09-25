@@ -3,6 +3,8 @@ package request
 import (
 	"bytes"
 	"context"
+	"encoding/json"
+	"goteway/pkg/auth"
 	"goteway/pkg/cache"
 	"goteway/pkg/log"
 	"io"
@@ -38,6 +40,11 @@ func (c *Client) Request(ctx context.Context, httpW http.ResponseWriter, httpR *
 		return
 	}
 
+	if call.isInternal && ctx.Value(auth.AUTH_CTX_KEY) == "" && !auth.IsValidToken(ctx) {
+		writeErrorResponse(httpW, map[string]any{"error": "Access denied"}, http.StatusUnauthorized)
+		return
+	}
+
 	// get response from cache
 	(*c.cache).Get(call)
 	if call.response != nil {
@@ -55,6 +62,7 @@ func (c *Client) Request(ctx context.Context, httpW http.ResponseWriter, httpR *
 
 	if err != nil {
 		log.LogError(ctx, err.Error())
+		writeErrorResponse(httpW, map[string]any{"error": "Service not available"}, http.StatusBadRequest)
 		return
 	}
 
@@ -89,4 +97,11 @@ func mapResponseIntoResponseWriter(r *http.Response, rw http.ResponseWriter) {
 	rw.Write(body)
 
 	r.Body = io.NopCloser(bytes.NewBuffer(body))
+}
+
+func writeErrorResponse(w http.ResponseWriter, response map[string]any, errorCode int) {
+	w.Header().Add("Content-Type", "application/json")
+	w.WriteHeader(errorCode)
+	byteResponse, _ := json.Marshal(response)
+	_, _ = w.Write(byteResponse)
 }

@@ -35,18 +35,10 @@ func (s *server) defaultRouteHandler() func(http.ResponseWriter, *http.Request) 
 
 func (s *server) loginHandler() func(http.ResponseWriter, *http.Request) {
 	return func(w http.ResponseWriter, r *http.Request) {
-		response := make(map[string]any)
-		response[""] = "login"
-
-		s.writeResponse(w, response)
 	}
 }
 
 func (s *server) logoutHandler() func(http.ResponseWriter, *http.Request) {
 	return func(w http.ResponseWriter, r *http.Request) {
-		response := make(map[string]any)
-		response[""] = "logout"
-
-		s.writeResponse(w, response)
 	}
 }

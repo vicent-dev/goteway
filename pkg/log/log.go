@@ -7,23 +7,23 @@ import (
 	"github.com/en-vee/alog"
 )
 
-type ContextLogKey string
+type contextLogKey string
 
-const METHOD_LOG_KEY = ContextLogKey("method")
-const PATH_LOG_KEY = ContextLogKey("path")
+const METHOD_CTX_LOG_KEY = contextLogKey("method")
+const PATH_CTX_LOG_KEY = contextLogKey("path")
 
 func LogError(ctx context.Context, l string) {
-	alog.Error(fmt.Sprintf("[%v] - %v: %v", ctx.Value(METHOD_LOG_KEY), ctx.Value(PATH_LOG_KEY), l))
+	alog.Error(fmt.Sprintf("[%v] - %v: %v", ctx.Value(METHOD_CTX_LOG_KEY), ctx.Value(PATH_CTX_LOG_KEY), l))
 }
 
 func LogWarn(ctx context.Context, l string) {
-	alog.Warn(fmt.Sprintf("[%v] - %v: %v", ctx.Value(METHOD_LOG_KEY), ctx.Value(PATH_LOG_KEY), l))
+	alog.Warn(fmt.Sprintf("[%v] - %v: %v", ctx.Value(METHOD_CTX_LOG_KEY), ctx.Value(PATH_CTX_LOG_KEY), l))
 }
 
 func LogInfo(ctx context.Context, l string) {
-	alog.Info(fmt.Sprintf("[%v] - %v: %v", ctx.Value(METHOD_LOG_KEY), ctx.Value(PATH_LOG_KEY), l))
+	alog.Info(fmt.Sprintf("[%v] - %v: %v", ctx.Value(METHOD_CTX_LOG_KEY), ctx.Value(PATH_CTX_LOG_KEY), l))
 }
 
 func LogRequest(ctx context.Context) {
-	alog.Info(fmt.Sprintf("[%v] - %v", ctx.Value(METHOD_LOG_KEY), ctx.Value(PATH_LOG_KEY)))
+	alog.Info(fmt.Sprintf("[%v] - %v", ctx.Value(METHOD_CTX_LOG_KEY), ctx.Value(PATH_CTX_LOG_KEY)))
 }
