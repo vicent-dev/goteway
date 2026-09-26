@@ -18,10 +18,12 @@ services:
   # auth required
   internal:
     - path: dumb-service
-      host: http://localhost:8000
+      host: localhost:8000
+    - path: ${MICROSERVICE_SERVICE_PATH}
+      host: ${MICROSERVICE_SERVICE_HOST}
   external:
-    - path: dumb-service/external
-      host: http://localhost:8000/external
+    - path: dumb-service 
+      host: localhost:8000/external
 ```
 
 WIP:
