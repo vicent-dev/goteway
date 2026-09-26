@@ -9,6 +9,7 @@ Gateway made in Go.
 - Embed config in a single binary output
 - Microservices simple configuration
 - Graceful SIGKILL
+- Rate limited to mitigate ddos attacks
 
 ```bash 
 # static/config.yaml

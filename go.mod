@@ -17,4 +17,5 @@ require (
 	github.com/stretchr/testify v1.11.1 // indirect
 	go.uber.org/atomic v1.11.0 // indirect
 	golang.org/x/sys v0.47.0 // indirect
+	golang.org/x/time v0.16.0 // indirect
 )

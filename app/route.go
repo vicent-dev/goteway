@@ -8,6 +8,7 @@ import (
 
 func (s *server) routes() {
 	s.r.Use(loggingMiddleware)
+	s.r.Use(rateLimiterMiddleware)
 
 	// auth handler
 	authR := s.r.PathPrefix("/auth").Subrouter()
