@@ -72,6 +72,7 @@ func (c *Client) Request(ctx context.Context, httpW http.ResponseWriter, httpR *
 
 	if err != nil {
 		log.LogError(ctx, err.Error())
+		writeErrorResponse(httpW, map[string]any{"error": "Service not available"}, http.StatusBadRequest)
 		return
 	}
 

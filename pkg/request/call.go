@@ -84,7 +84,7 @@ func NewCall(r *http.Request, servicesConfig ServicesConfig) (*Call, error) {
 
 func findServiceConfigForUri(uri string, servicesConfig ServicesConfig) (*ServiceConfig, bool) {
 
-	var sc *ServiceConfig
+	var sc *ServiceConfig = nil
 	isInternal := false
 
 	for _, s := range servicesConfig.External {
@@ -99,7 +99,7 @@ func findServiceConfigForUri(uri string, servicesConfig ServicesConfig) (*Servic
 
 		if matched, _ := regexp.MatchString(s.Path+"*", uri); matched {
 
-			if sc == nil || (sc != nil && strings.Count(s.Path, "/") > strings.Count(sc.Path, "/")) {
+			if sc == nil || strings.Count(s.Path, "/") > strings.Count(sc.Path, "/") {
 				isInternal = true
 				sc = &s
 				break
