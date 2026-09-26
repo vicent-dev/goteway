@@ -1,9 +1,13 @@
 package app
 
 import (
+	"context"
+	"goteway/pkg/log"
 	"goteway/pkg/request"
 	"goteway/static"
+	"os"
 
+	"github.com/joho/godotenv"
 	"gopkg.in/yaml.v2"
 )
 
@@ -51,8 +55,15 @@ func (c config) convertServicesToRequest() request.ServicesConfig {
 func loadConfig() *config {
 	c := &config{}
 
+	err := godotenv.Load() // optional .env load
+	if err != nil {
+		log.LogWarn(context.Background(), err.Error())
+	}
+
 	cFile := static.GetConfigFile()
-	err := yaml.Unmarshal(cFile, c)
+	cFile = []byte(os.ExpandEnv(string(cFile)))
+
+	err = yaml.Unmarshal(cFile, c)
 
 	if err != nil {
 		panic(err)
