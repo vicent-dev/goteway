@@ -9,6 +9,7 @@ import (
 
 	"github.com/gorilla/handlers"
 	"github.com/gorilla/mux"
+	"github.com/prometheus/client_golang/prometheus"
 	"github.com/redis/go-redis/v9"
 )
 
@@ -16,6 +17,7 @@ type server struct {
 	r          *mux.Router
 	c          *config
 	rdb        *redis.Client
+	pr         *prometheus.Registry
 	httpServer http.Server
 }
 
@@ -28,6 +30,7 @@ func NewServer() *server {
 
 	s.redis()
 	s.routes()
+	s.prometheus()
 
 	s.httpServer = http.Server{
 		Addr:    ":" + s.c.Server.Port,

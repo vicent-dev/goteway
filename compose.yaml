@@ -1,0 +1,47 @@
+services:
+  # app:
+  #   build: .
+  #   container_name: goteway
+  #   ports:
+  #     - 8080:8080
+  #   networks:
+  #     - goteway
+
+  redis:
+    image: redis:8-alpine
+    container_name: redis
+    networks:
+      - goteway
+    ports:
+      - 6379:6379
+    restart: unless-stopped
+
+  prometheus:
+    container_name: prometheus
+    image: prom/prometheus:v2.55.0
+    volumes:
+      - ./docker/prometheus.yml:/etc/prometheus/prometheus.yml
+    ports:
+      - 9090:9090
+    networks:
+      - goteway
+  
+  grafana:
+    container_name: grafana
+    image: grafana/grafana:11.3.0
+    volumes:
+      - ./docker/grafana.yml:/etc/grafana/provisioning/datasources/datasource.yaml
+      - grafana-data:/var/lib/grafana
+    ports:
+      - 3000:3000
+    networks:
+      - goteway
+    environment:
+      - GF_SECURITY_ADMIN_USER=admin
+      - GF_SECURITY_ADMIN_PASSWORD=password
+volumes:
+  grafana-data:
+
+networks:
+  goteway:
+    driver: bridge

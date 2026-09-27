@@ -9,6 +9,10 @@ import (
 func (s *server) routes() {
 	s.r.Use(loggingMiddleware)
 	s.r.Use(rateLimiterMiddleware)
+	s.r.Use(s.requestMetricsMiddleware)
+
+	// prometheus metrics
+	s.r.HandleFunc("/metrics", s.metricsHandler()).Methods("GET")
 
 	// auth handler
 	authR := s.r.PathPrefix("/auth").Subrouter()
