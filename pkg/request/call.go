@@ -27,7 +27,7 @@ type Call struct {
 	isInternal bool
 	requestUrl string
 	request    *http.Request
-	response   *http.Response
+	Response   *http.Response
 }
 
 func NewCall(r *http.Request, servicesConfig ServicesConfig) (*Call, error) {
@@ -78,7 +78,7 @@ func NewCall(r *http.Request, servicesConfig ServicesConfig) (*Call, error) {
 		isInternal: isInternal,
 		requestUrl: requestUrl,
 		request:    r,
-		response:   nil,
+		Response:   nil,
 	}, nil
 }
 
@@ -117,16 +117,16 @@ func (c *Call) Key() string {
 
 func (c *Call) Value() string {
 
-	defer c.response.Body.Close()
+	defer c.Response.Body.Close()
 
-	body, _ := io.ReadAll(c.response.Body)
+	body, _ := io.ReadAll(c.Response.Body)
 
 	serialized := serializedResponse{
-		c.response.Status,
-		c.response.StatusCode,
+		c.Response.Status,
+		c.Response.StatusCode,
 		string(body),
-		c.response.Header,
-		c.response.Cookies(),
+		c.Response.Header,
+		c.Response.Cookies(),
 	}
 
 	v, err := json.Marshal(serialized)
@@ -148,9 +148,9 @@ func (c *Call) SetValue(s string) {
 		return
 	}
 
-	c.response = &http.Response{}
-	c.response.Status = serialized.Status
-	c.response.StatusCode = serialized.StatusCode
-	c.response.Body = io.NopCloser(bytes.NewReader([]byte(serialized.Body)))
-	c.response.Header = serialized.Header
+	c.Response = &http.Response{}
+	c.Response.Status = serialized.Status
+	c.Response.StatusCode = serialized.StatusCode
+	c.Response.Body = io.NopCloser(bytes.NewReader([]byte(serialized.Body)))
+	c.Response.Header = serialized.Header
 }
