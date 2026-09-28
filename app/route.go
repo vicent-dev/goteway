@@ -3,6 +3,7 @@ package app
 import (
 	"goteway/pkg/cache"
 	"goteway/pkg/request"
+	"io"
 	"net/http"
 )
 
@@ -28,7 +29,24 @@ func (s *server) defaultRouteHandler() func(http.ResponseWriter, *http.Request) 
 	return func(w http.ResponseWriter, r *http.Request) {
 		ctx := r.Context()
 
-		client.Request(ctx, w, r)
+		call, statusCode, err := client.Request(ctx, w, r)
+
+		if err != nil {
+			writeErrorResponse(w, map[string]any{"error": err.Error()}, statusCode)
+			return
+		}
+
+		body, _ := io.ReadAll(call.Response.Body)
+		defer call.Response.Body.Close()
+
+		for hn, hvs := range call.Response.Header {
+			w.Header().Del(hn)
+			for _, hv := range hvs {
+				w.Header().Add(hn, hv)
+			}
+		}
+
+		w.Write(body)
 
 		ctx.Done()
 	}

@@ -1,13 +1,11 @@
 package request
 
 import (
-	"bytes"
 	"context"
-	"encoding/json"
+	"errors"
 	"goteway/pkg/auth"
 	"goteway/pkg/cache"
 	"goteway/pkg/log"
-	"io"
 	"net/http"
 	"time"
 )
@@ -31,26 +29,24 @@ func NewClient(c *cache.Cache[*Call], services ServicesConfig) *Client {
 	return &Client{c, services}
 }
 
-func (c *Client) Request(ctx context.Context, httpW http.ResponseWriter, httpR *http.Request) {
+func (c *Client) Request(ctx context.Context, httpW http.ResponseWriter, httpR *http.Request) (*Call, int, error) {
 
 	call, err := NewCall(httpR, c.servicesConfig)
 
 	if err != nil {
 		log.LogError(ctx, err.Error())
-		return
+		return nil, http.StatusBadRequest, err
 	}
 
 	if call.isInternal && ctx.Value(auth.AUTH_CTX_KEY) == "" && !auth.IsValidToken(ctx) {
-		writeErrorResponse(httpW, map[string]any{"error": "Access denied"}, http.StatusUnauthorized)
-		return
+		return nil, http.StatusUnauthorized, errors.New("access denied")
 	}
 
 	// get response from cache
 	(*c.cache).Get(call)
-	if call.response != nil {
+	if call.Response != nil {
 		log.LogInfo(ctx, "Serve response from cache")
-		mapResponseIntoResponseWriter(call.response, httpW)
-		return
+		return call, call.Response.StatusCode, nil
 	}
 
 	// http request if not found and async cache
@@ -62,47 +58,21 @@ func (c *Client) Request(ctx context.Context, httpW http.ResponseWriter, httpR *
 
 	if err != nil {
 		log.LogError(ctx, err.Error())
-		writeErrorResponse(httpW, map[string]any{"error": "Service not available"}, http.StatusBadRequest)
-		return
+		return call, call.Response.StatusCode, errors.New("service not available")
 	}
 
 	client := &http.Client{Timeout: 10 * time.Second}
 
-	call.response, err = client.Do(internalRequest)
+	call.Response, err = client.Do(internalRequest)
 
 	if err != nil {
 		log.LogError(ctx, err.Error())
-		writeErrorResponse(httpW, map[string]any{"error": "Service not available"}, http.StatusBadRequest)
-		return
+		return call, call.Response.StatusCode, errors.New("service not available")
 	}
-
-	mapResponseIntoResponseWriter(call.response, httpW)
 
 	go func(call *Call) {
 		(*c.cache).Set(call)
 	}(call)
-}
 
-func mapResponseIntoResponseWriter(r *http.Response, rw http.ResponseWriter) {
-	body, _ := io.ReadAll(r.Body)
-
-	defer r.Body.Close()
-
-	for hn, hvs := range r.Header {
-		rw.Header().Del(hn)
-		for _, hv := range hvs {
-			rw.Header().Add(hn, hv)
-		}
-	}
-
-	rw.Write(body)
-
-	r.Body = io.NopCloser(bytes.NewBuffer(body))
-}
-
-func writeErrorResponse(w http.ResponseWriter, response map[string]any, errorCode int) {
-	w.Header().Add("Content-Type", "application/json")
-	w.WriteHeader(errorCode)
-	byteResponse, _ := json.Marshal(response)
-	_, _ = w.Write(byteResponse)
+	return call, call.Response.StatusCode, nil
 }

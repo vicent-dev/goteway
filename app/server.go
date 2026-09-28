@@ -2,6 +2,7 @@ package app
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"log"
 	"net/http"
@@ -59,4 +60,11 @@ func (s *server) Run(ctx context.Context) error {
 	}
 
 	return <-errCh
+}
+
+func writeErrorResponse(w http.ResponseWriter, response map[string]any, errorCode int) {
+	w.Header().Add("Content-Type", "application/json")
+	w.WriteHeader(errorCode)
+	byteResponse, _ := json.Marshal(response)
+	_, _ = w.Write(byteResponse)
 }
