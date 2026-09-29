@@ -58,7 +58,7 @@ func (c *Client) Request(ctx context.Context, httpW http.ResponseWriter, httpR *
 
 	if err != nil {
 		log.LogError(ctx, err.Error())
-		return call, call.Response.StatusCode, errors.New("service not available")
+		return nil, http.StatusBadRequest, errors.New("service not available")
 	}
 
 	client := &http.Client{Timeout: 10 * time.Second}
@@ -67,7 +67,7 @@ func (c *Client) Request(ctx context.Context, httpW http.ResponseWriter, httpR *
 
 	if err != nil {
 		log.LogError(ctx, err.Error())
-		return call, call.Response.StatusCode, errors.New("service not available")
+		return call, http.StatusBadRequest, errors.New("service not available")
 	}
 
 	go func(call *Call) {
