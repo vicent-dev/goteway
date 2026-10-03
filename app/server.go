@@ -53,7 +53,8 @@ func (s *server) Run(ctx context.Context) error {
 	log.Println("shutting down HTTP server...")
 
 	// give in-flight requests a deadline to finish
-	shutdownCtx, _ := context.WithTimeout(context.Background(), 10*time.Second)
+	shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
 
 	if err := s.httpServer.Shutdown(shutdownCtx); err != nil {
 		return fmt.Errorf("http server shutdown: %w", err)

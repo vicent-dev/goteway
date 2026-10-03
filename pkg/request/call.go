@@ -90,7 +90,7 @@ func findServiceConfigForUri(uri string, servicesConfig ServicesConfig) (*Servic
 	for _, s := range servicesConfig.External {
 
 		if matched, _ := regexp.MatchString(s.Path+"*", uri); matched {
-			sc = &s
+			sc = &ServiceConfig{Path: s.Path, Host: s.Host}
 			break
 		}
 	}
@@ -101,7 +101,7 @@ func findServiceConfigForUri(uri string, servicesConfig ServicesConfig) (*Servic
 
 			if sc == nil || strings.Count(s.Path, "/") > strings.Count(sc.Path, "/") {
 				isInternal = true
-				sc = &s
+				sc = &ServiceConfig{Path: s.Path, Host: s.Host}
 				break
 			}
 
