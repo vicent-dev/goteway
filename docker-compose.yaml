@@ -22,16 +22,5 @@ services:
       timeout: 3s
       retries: 5
     restart: unless-stopped
-  opencode:
-    image: ghcr.io/anomalyco/opencode:latest
-    container_name: opencode
-    stdin_open: true
-    tty: true
-    volumes:
-      - .:/app
-      - ~/.config/opencode:/home/opencode/.config/opencode
-      - ~/.local/share/opencode:/home/opencode/.local/share/opencode
-    working_dir: /app
-    restart: unless-stopped
 networks:
   goteway:
