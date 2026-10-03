@@ -104,7 +104,7 @@ func TestClient_RequestCacheHit(t *testing.T) {
 	call1, err := NewCall(req, services)
 	assert.NoError(t, err)
 	key := call1.Key()
-	
+
 	// Put in cache
 	resp := &http.Response{
 		Status:     "200 OK",
@@ -123,7 +123,7 @@ func TestClient_RequestCacheHit(t *testing.T) {
 	assert.NotNil(t, call2.Response)
 }
 
-func TestClient_InternalRequiresAuth(t *testing.T) {
+func TestClient_InternalRequiresAPrincipal(t *testing.T) {
 	services := ServicesConfig{
 		Internal: []ServiceConfig{
 			{Path: "admin", Host: "admin:8080"},
@@ -136,7 +136,7 @@ func TestClient_InternalRequiresAuth(t *testing.T) {
 
 	req, err := http.NewRequest("GET", "http://gateway/admin/users", nil)
 	assert.NoError(t, err)
-	ctx := context.Background() // no auth
+	ctx := context.Background() // no principal
 
 	call, status, err := client.Request(ctx, httptest.NewRecorder(), req)
 	assert.Error(t, err)
@@ -144,7 +144,7 @@ func TestClient_InternalRequiresAuth(t *testing.T) {
 	assert.Nil(t, call)
 }
 
-func TestClient_InternalWithAuth(t *testing.T) {
+func TestClient_InternalWithAPrincipal(t *testing.T) {
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
 		w.Write([]byte(`ok`))
@@ -163,7 +163,7 @@ func TestClient_InternalWithAuth(t *testing.T) {
 
 	req, err := http.NewRequest("GET", "http://gateway/admin/users", nil)
 	assert.NoError(t, err)
-	ctx := context.WithValue(context.Background(), auth.AUTH_CTX_KEY, "Bearer token")
+	ctx := auth.WithPrincipal(context.Background(), &auth.Principal{UserID: 7})
 
 	call, status, err := client.Request(ctx, httptest.NewRecorder(), req)
 	assert.NoError(t, err)

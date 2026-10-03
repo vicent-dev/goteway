@@ -1,13 +1,20 @@
 services:
   app:
-    build: docker/Dockerfile
+    build:
+      context: .
+      dockerfile: docker/Dockerfile
     container_name: goteway
     ports:
       - 8080:8080
+    environment:
+      # the gateway reaches the database by service name inside the network
+      DB_HOST: db
     networks:
       - goteway
     depends_on:
       redis:
+        condition: service_healthy
+      db:
         condition: service_healthy
   redis:
     image: redis:8-alpine
@@ -22,5 +29,24 @@ services:
       timeout: 3s
       retries: 5
     restart: unless-stopped
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: ${DB_USER:-goteway}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-goteway}
+      POSTGRES_DB: ${DB_NAME:-goteway}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USER:-goteway} -d ${DB_NAME:-goteway}"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    networks:
+      - goteway
+
 networks:
   goteway:
+
+volumes:
+  pgdata:
