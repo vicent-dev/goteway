@@ -1,3 +1,6 @@
+install:
+	go mod tidy && go get goteway
+
 run:
 	go run ./cmd/server/main.go
 
