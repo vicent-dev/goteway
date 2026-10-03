@@ -43,13 +43,18 @@ func NewCall(r *http.Request, servicesConfig ServicesConfig) (*Call, error) {
 	var buf bytes.Buffer
 	encoder := base64.NewEncoder(base64.StdEncoding, &buf)
 	defer encoder.Close()
-	defer r.Body.Close()
+	if r.Body != nil {
+		defer r.Body.Close()
+	}
 
 	header := r.Header
 	// @todo check other time based headers
 	header.Del("Date")
 
-	body, _ := io.ReadAll(r.Body)
+	var body []byte
+	if r.Body != nil {
+		body, _ = io.ReadAll(r.Body)
+	}
 
 	encodeKey := struct {
 		Url     any
@@ -71,7 +76,9 @@ func NewCall(r *http.Request, servicesConfig ServicesConfig) (*Call, error) {
 		return nil, err
 	}
 
-	r.Body = io.NopCloser(bytes.NewBuffer(body))
+	if r.Body != nil {
+		r.Body = io.NopCloser(bytes.NewBuffer(body))
+	}
 
 	return &Call{
 		id:         buf.String(),
@@ -102,7 +109,8 @@ func findServiceConfigForUri(uri string, servicesConfig ServicesConfig) (*Servic
 			if sc == nil || strings.Count(s.Path, "/") > strings.Count(sc.Path, "/") {
 				isInternal = true
 				sc = &ServiceConfig{Path: s.Path, Host: s.Host}
-				break
+				// Continue scanning to find deeper matches
+				continue
 			}
 
 		}

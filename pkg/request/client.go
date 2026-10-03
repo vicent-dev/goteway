@@ -7,6 +7,7 @@ import (
 	"goteway/pkg/cache"
 	"goteway/pkg/log"
 	"net/http"
+	"strings"
 	"time"
 )
 
@@ -38,7 +39,7 @@ func (c *Client) Request(ctx context.Context, httpW http.ResponseWriter, httpR *
 		return nil, http.StatusBadRequest, err
 	}
 
-	if call.isInternal && ctx.Value(auth.AUTH_CTX_KEY) == "" && !auth.IsValidToken(ctx) {
+	if call.isInternal && !auth.IsValidToken(ctx) {
 		return nil, http.StatusUnauthorized, errors.New("access denied")
 	}
 
@@ -50,9 +51,13 @@ func (c *Client) Request(ctx context.Context, httpW http.ResponseWriter, httpR *
 	}
 
 	// http request if not found and async cache
+	requestUrl := call.requestUrl
+	if !strings.HasPrefix(requestUrl, "http://") && !strings.HasPrefix(requestUrl, "https://") {
+		requestUrl = "http://" + requestUrl
+	}
 	internalRequest, err := http.NewRequest(
 		call.request.Method,
-		call.requestUrl,
+		requestUrl,
 		call.request.Body,
 	)
 

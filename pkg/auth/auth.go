@@ -10,5 +10,12 @@ const AUTH_CTX_KEY = contextAuthKey("auth")
 
 func IsValidToken(ctx context.Context) bool {
 	// @todo implement token validation
-	return ctx.Value(AUTH_CTX_KEY) != ""
+	v := ctx.Value(AUTH_CTX_KEY)
+	if v == nil {
+		return false
+	}
+	if s, ok := v.(string); ok {
+		return s != ""
+	}
+	return false
 }
