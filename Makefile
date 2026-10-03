@@ -1,3 +1,6 @@
+install:
+	go mod tidy && go get goteway
+
 run:
 	go run ./cmd/server/main.go
 
@@ -12,3 +15,9 @@ watch:
 
 opencode:
 	docker exec -it opencode opencode
+test:
+	go test -v ./...
+
+test-coverage:
+	go test -coverprofile=coverage.out ./...
+	go tool cover -html=coverage.out
