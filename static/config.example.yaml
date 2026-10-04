@@ -4,6 +4,9 @@ server:
 redis:
   host: redis
   port: 6379
+  username: ${REDIS_USERNAME:-}
+  password: ${REDIS_PASSWORD:-}
+  db: ${REDIS_DB:-0}
 
 services:
   # auth required

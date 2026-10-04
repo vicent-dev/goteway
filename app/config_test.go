@@ -1,6 +1,7 @@
 package app
 
 import (
+	"net"
 	"testing"
 	"time"
 
@@ -83,6 +84,60 @@ func TestConfigDefaults(t *testing.T) {
 	assert.Equal(t, "disable", c.DB.SSLMode)
 }
 
+func TestRedisConfigAddr(t *testing.T) {
+	tests := []struct {
+		name string
+		cfg  RedisConfig
+		want string
+	}{
+		{name: "host and port", cfg: RedisConfig{Host: "redis", Port: "6379"}, want: "redis:6379"},
+		{name: "ipv4 host", cfg: RedisConfig{Host: "127.0.0.1", Port: "6379"}, want: "127.0.0.1:6379"},
+		{
+			// Joining is the reason Addr exists: string concatenation would
+			// produce an address redis cannot dial.
+			name: "ipv6 host",
+			cfg:  RedisConfig{Host: "::1", Port: "6379"},
+			want: "[::1]:6379",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equal(t, tt.want, tt.cfg.Addr())
+		})
+	}
+}
+
+// db is the one redis setting that is not a string, so it is the one that can
+// break on expansion: an unset variable expands to empty, which does not
+// unmarshal into an int.
+func TestRedisConfigEnvironment(t *testing.T) {
+	t.Setenv("REDIS_USERNAME", "gateway")
+	t.Setenv("REDIS_PASSWORD", "s3cret")
+
+	testConfig := []byte(`
+redis:
+  host: redis
+  port: 6379
+  username: ${REDIS_USERNAME}
+  password: ${REDIS_PASSWORD}
+  db: ${REDIS_DB:-0}
+`)
+	c := &Config{}
+	require.NoError(t, yaml.Unmarshal([]byte(expandEnv(string(testConfig))), c))
+
+	assert.Equal(t, "redis", c.Redis.Host)
+	assert.Equal(t, "gateway", c.Redis.Username)
+	assert.Equal(t, "s3cret", c.Redis.Password)
+	assert.Equal(t, 0, c.Redis.DB)
+
+	t.Setenv("REDIS_DB", "7")
+	c = &Config{}
+	require.NoError(t, yaml.Unmarshal([]byte(expandEnv(string(testConfig))), c))
+
+	assert.Equal(t, 7, c.Redis.DB)
+}
+
 func TestDBConfigDSN(t *testing.T) {
 	dsn := DBConfig{
 		Host: "db", Port: "5432", User: "goteway", Password: "secret", Name: "goteway", SSLMode: "require",
@@ -129,6 +184,8 @@ func TestLoadConfig(t *testing.T) {
 	require.NotNil(t, c)
 	assert.NotEmpty(t, c.Server.Port)
 	assert.NotEmpty(t, c.Redis.Port)
+	assert.Equal(t, net.JoinHostPort(c.Redis.Host, c.Redis.Port), c.Redis.Addr())
+	assert.GreaterOrEqual(t, c.Redis.DB, 0)
 
 	// The shipped configuration has to yield a usable auth domain.
 	require.NoError(t, c.AuthConfig().Validate())

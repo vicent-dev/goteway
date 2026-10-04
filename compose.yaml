@@ -43,6 +43,8 @@ services:
       POSTGRES_USER: ${DB_USER:-goteway}
       POSTGRES_PASSWORD: ${DB_PASSWORD:-goteway}
       POSTGRES_DB: ${DB_NAME:-goteway}
+    ports:
+      - 5432:5432
     volumes:
       - pgdata:/var/lib/postgresql/data
     healthcheck:
