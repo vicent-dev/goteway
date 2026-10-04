@@ -6,9 +6,11 @@ import (
 	"io"
 	"net/http"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestFindServiceConfigForUri(t *testing.T) {
@@ -130,12 +132,54 @@ func TestNewCall_ServiceNotFound(t *testing.T) {
 	assert.NoError(t, err)
 
 	call, err := NewCall(req, services)
-	assert.Error(t, err)
+
+	// The path travels with the error, so a log line says what matched nothing.
+	assert.ErrorIs(t, err, ErrServiceNotFound)
+	assert.ErrorContains(t, err, "/unknown")
 	assert.Nil(t, call)
 }
 
-func TestCall_ValueSetValue(t *testing.T) {
-	// Create a response
+func TestNewCall_BodyIsHandedBackToTheCaller(t *testing.T) {
+	services := ServicesConfig{
+		External: []ServiceConfig{{Path: "api", Host: "backend.example.com"}},
+	}
+
+	body := []byte(`{"test": "data"}`)
+	req, err := http.NewRequest("POST", "http://gateway/api/users", bytes.NewReader(body))
+	require.NoError(t, err)
+
+	_, err = NewCall(req, services)
+	require.NoError(t, err)
+
+	// Fingerprinting reads the body, so the upstream request is only possible
+	// because NewCall puts it back.
+	read, err := io.ReadAll(req.Body)
+	require.NoError(t, err)
+	assert.Equal(t, body, read)
+}
+
+func TestNewCall_UnreadableBodyIsReported(t *testing.T) {
+	services := ServicesConfig{
+		External: []ServiceConfig{{Path: "api", Host: "backend.example.com"}},
+	}
+
+	req, err := http.NewRequest("POST", "http://gateway/api/users", strings.NewReader("data"))
+	require.NoError(t, err)
+	req.Body = io.NopCloser(errReader{})
+
+	// Fingerprinting a truncated body would key the cache on a request that
+	// never arrived, so the read failure has to be visible.
+	_, err = NewCall(req, services)
+	assert.ErrorIs(t, err, ErrRequestBodyRead)
+}
+
+// errReader is a body that fails halfway through, which a plain
+// io.NopCloser cannot express.
+type errReader struct{}
+
+func (errReader) Read([]byte) (int, error) { return 0, io.ErrUnexpectedEOF }
+
+func TestCall_AttachResponseSnapshot(t *testing.T) {
 	resp := &http.Response{
 		Status:     "200 OK",
 		StatusCode: 200,
@@ -143,27 +187,103 @@ func TestCall_ValueSetValue(t *testing.T) {
 		Body:       io.NopCloser(strings.NewReader(`{"result": "ok"}`)),
 	}
 
-	call := &Call{Response: resp}
-	value := call.Value()
-	assert.NotEmpty(t, value)
+	call := &Call{}
+	require.NoError(t, call.attachResponse(resp))
 
-	// Decode to verify structure
+	value, err := call.Value()
+	require.NoError(t, err)
+
 	var serialized serializedResponse
-	err := json.Unmarshal([]byte(value), &serialized)
-	assert.NoError(t, err)
+	require.NoError(t, json.Unmarshal([]byte(value), &serialized))
 	assert.Equal(t, "200 OK", serialized.Status)
 	assert.Equal(t, 200, serialized.StatusCode)
 	assert.Equal(t, `{"result": "ok"}`, serialized.Body)
+}
 
-	// SetValue back
-	call2 := &Call{}
-	call2.SetValue(value)
-	assert.NotNil(t, call2.Response)
-	assert.Equal(t, 200, call2.Response.StatusCode)
-	assert.Equal(t, "200 OK", call2.Response.Status)
-	body, err := io.ReadAll(call2.Response.Body)
-	assert.NoError(t, err)
+func TestCall_LeavesTheHandlerItsOwnBody(t *testing.T) {
+	resp := &http.Response{
+		Status:     "200 OK",
+		StatusCode: 200,
+		Header:     http.Header{"Content-Type": {"application/json"}},
+		Body:       io.NopCloser(strings.NewReader(`{"result": "ok"}`)),
+	}
+
+	call := &Call{}
+	require.NoError(t, call.attachResponse(resp))
+
+	// The cache is serialized while the handler is still streaming the response
+	// to the client, so serializing must read the snapshot and leave the
+	// handler's reader alone.
+	_, err := call.Value()
+	require.NoError(t, err)
+
+	body, err := io.ReadAll(call.Response.Body)
+	require.NoError(t, err)
 	assert.Equal(t, `{"result": "ok"}`, string(body))
+}
+
+func TestCall_AttachResponseReportsAnUnreadableBody(t *testing.T) {
+	resp := &http.Response{
+		StatusCode: 200,
+		Body:       io.NopCloser(errReader{}),
+	}
+
+	call := &Call{}
+	assert.ErrorIs(t, call.attachResponse(resp), ErrResponseRead)
+}
+
+func TestCall_ValueWithoutAResponse(t *testing.T) {
+	value, err := (&Call{}).Value()
+
+	assert.ErrorIs(t, err, ErrNoResponse)
+	assert.Empty(t, value)
+}
+
+func TestCall_SetValue(t *testing.T) {
+	call := &Call{}
+	require.NoError(t, call.SetValue(
+		`{"status":"200 OK","status_code":200,"body":"{\"result\": \"ok\"}","header":{"Content-Type":["application/json"]}}`))
+
+	require.NotNil(t, call.Response)
+	assert.Equal(t, "200 OK", call.Response.Status)
+	assert.Equal(t, 200, call.Response.StatusCode)
+	assert.Equal(t, "application/json", call.Response.Header.Get("Content-Type"))
+
+	body, err := io.ReadAll(call.Response.Body)
+	require.NoError(t, err)
+	assert.Equal(t, `{"result": "ok"}`, string(body))
+}
+
+func TestCall_SetValueRejectsACorruptEntry(t *testing.T) {
+	call := &Call{}
+
+	// A payload that cannot be decoded is reported rather than ignored, so a
+	// corrupted entry cannot be mistaken for an empty response.
+	assert.ErrorIs(t, call.SetValue("not json"), ErrResponseDeserialization)
+	assert.Nil(t, call.Response)
+}
+
+func TestCall_ValueSetValueRoundTrip(t *testing.T) {
+	resp := &http.Response{
+		Status:     "201 Created",
+		StatusCode: 201,
+		Header:     http.Header{"Content-Type": {"application/json"}},
+		Body:       io.NopCloser(strings.NewReader(`{"result": "ok"}`)),
+	}
+
+	call := &Call{}
+	require.NoError(t, call.attachResponse(resp))
+
+	value, err := call.Value()
+	require.NoError(t, err)
+	assert.NotEmpty(t, value)
+
+	restored := &Call{}
+	require.NoError(t, restored.SetValue(value))
+
+	again, err := restored.Value()
+	require.NoError(t, err)
+	assert.Equal(t, value, again)
 }
 
 func TestNewCall_InternalFlag(t *testing.T) {
@@ -179,4 +299,44 @@ func TestNewCall_InternalFlag(t *testing.T) {
 	call, err := NewCall(req, services)
 	assert.NoError(t, err)
 	assert.True(t, call.isInternal)
+}
+
+// TestCall_ValueAndHandlerReadConcurrently is the regression test for the
+// snapshot: run with -race, serializing for the cache and copying the body to
+// the client happen at once and must both see the whole payload.
+func TestCall_ValueAndHandlerReadConcurrently(t *testing.T) {
+	resp := &http.Response{
+		Status:     "200 OK",
+		StatusCode: 200,
+		Header:     http.Header{"Content-Type": {"application/json"}},
+		Body:       io.NopCloser(strings.NewReader(`{"result": "ok"}`)),
+	}
+
+	call := &Call{}
+	require.NoError(t, call.attachResponse(resp))
+
+	cached := make(chan string, 1)
+
+	var wg sync.WaitGroup
+	wg.Add(2)
+
+	go func() {
+		defer wg.Done()
+		value, err := call.Value()
+		assert.NoError(t, err)
+		cached <- value
+	}()
+	go func() {
+		defer wg.Done()
+		body, err := io.ReadAll(call.Response.Body)
+		assert.NoError(t, err)
+		assert.Equal(t, `{"result": "ok"}`, string(body))
+	}()
+
+	wg.Wait()
+	close(cached)
+
+	var serialized serializedResponse
+	require.NoError(t, json.Unmarshal([]byte(<-cached), &serialized))
+	assert.Equal(t, `{"result": "ok"}`, serialized.Body)
 }
