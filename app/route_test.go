@@ -2,6 +2,7 @@ package app
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -21,6 +22,7 @@ import (
 	"gorm.io/gorm/logger"
 
 	"goteway/pkg/auth"
+	"goteway/pkg/request"
 )
 
 // The handlers build their own auth service out of the server's infrastructure,
@@ -523,6 +525,98 @@ func TestProxyReportsUnknownService(t *testing.T) {
 	rec := doRequestAs(s, http.MethodGet, "/unknown/path", "", session.AccessToken)
 
 	// Authenticated, but nothing is configured to serve it.
-	assert.Equal(t, http.StatusBadRequest, rec.Code)
-	assert.JSONEq(t, `{"error":"service config not found"}`, rec.Body.String())
+	assert.Equal(t, http.StatusNotFound, rec.Code)
+	assert.JSONEq(t, `{"error":"not found"}`, rec.Body.String())
+}
+
+func TestProxyReportsAnUnreachableUpstream(t *testing.T) {
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Write([]byte("never"))
+	}))
+	host := upstream.URL[len("http://"):]
+	upstream.Close()
+
+	cfg := testConfig()
+	cfg.Services = ServicesConfig{
+		External: []Upstream{{Path: "public", Host: host}},
+	}
+	s := newTestServer(t, cfg)
+	session := register(t, s, "ada@example.com")
+
+	rec := doRequestAs(s, http.MethodGet, "/public/thing", "", session.AccessToken)
+
+	// Our upstream failed, not the request: that is a gateway status.
+	assert.Equal(t, http.StatusBadGateway, rec.Code)
+	assert.JSONEq(t, `{"error":"service not available"}`, rec.Body.String())
+	// The host and the dial error stay in the log.
+	assert.NotContains(t, rec.Body.String(), host)
+}
+
+// TestWriteRequestError maps the whole error surface of the proxy, including
+// the branches no route can reach on its own, the same way
+// TestAuthHandlerErrorMapping covers the auth domain.
+func TestWriteRequestError(t *testing.T) {
+	tests := []struct {
+		name       string
+		err        error
+		wantStatus int
+		wantBody   string
+	}{
+		{
+			name:       "the path is real, the caller is not allowed on it",
+			err:        request.ErrAccessDenied,
+			wantStatus: http.StatusUnauthorized,
+			wantBody:   `{"error":"unauthorized"}`,
+		},
+		{
+			name:       "nothing is configured to serve the path",
+			err:        fmt.Errorf("%w: /unknown", request.ErrServiceNotFound),
+			wantStatus: http.StatusNotFound,
+			wantBody:   `{"error":"not found"}`,
+		},
+		{
+			name:       "the upstream did not answer",
+			err:        fmt.Errorf("%w: dial tcp 10.0.0.1:8080: connection refused", request.ErrServiceUnavailable),
+			wantStatus: http.StatusBadGateway,
+			wantBody:   `{"error":"service not available"}`,
+		},
+		{
+			name:       "the configured host is unusable",
+			err:        fmt.Errorf("%w: invalid character in host name", request.ErrInvalidUpstreamURL),
+			wantStatus: http.StatusInternalServerError,
+			wantBody:   `{"error":"internal error"}`,
+		},
+		{
+			name:       "an error nobody has classified yet",
+			err:        errors.New("something else went wrong"),
+			wantStatus: http.StatusInternalServerError,
+			wantBody:   `{"error":"internal error"}`,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			rec := httptest.NewRecorder()
+			writeRequestError(rec, httptest.NewRequest(http.MethodGet, "/api/test", nil), tt.err)
+
+			assert.Equal(t, tt.wantStatus, rec.Code)
+			assert.Equal(t, "application/json", rec.Header().Get("Content-Type"))
+			assert.JSONEq(t, tt.wantBody, rec.Body.String())
+		})
+	}
+}
+
+// TestWriteRequestErrorHidesTheCause checks the property the whole mapping
+// exists for: the proxy errors name upstream hosts and dial failures, and none
+// of that may be echoed to the client.
+func TestWriteRequestErrorHidesTheCause(t *testing.T) {
+	rec := httptest.NewRecorder()
+	writeRequestError(rec, httptest.NewRequest(http.MethodGet, "/api/test", nil),
+		fmt.Errorf("%w: %v", request.ErrServiceUnavailable,
+			errors.New(`Get "http://internal.example.com:8080/test": dial tcp: connection refused`)))
+
+	assert.Equal(t, http.StatusBadGateway, rec.Code)
+	assert.JSONEq(t, `{"error":"service not available"}`, rec.Body.String())
+	assert.NotContains(t, rec.Body.String(), "internal.example.com")
+	assert.NotContains(t, rec.Body.String(), "connection refused")
 }
