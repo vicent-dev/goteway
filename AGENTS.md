@@ -143,7 +143,6 @@ Deliberately not fixed yet, because fixing them means changing behaviour or addi
   `findServiceConfigForUri`, where external wins an equal-depth tie.
 - `ServicesConfig` has no `Validate()`, unlike `auth.Config`: a malformed host is discovered per
   request as a 500 rather than at startup.
-- Redis password and DB are hardcoded to `""` / `0` in `app/redis.go`.
 - `docker-compose.yaml` forwards only `DB_HOST` to `app`, while `${VAR}` in the embedded config is
   expanded from the *container's* environment at start-up — so exporting `AUTH_ACCESS_SECRET` in the
   host shell has no effect until it is added to the `app` service's `environment:` block.
@@ -191,6 +190,13 @@ Already fixed (kept here so the reasoning is not lost):
   truncated request. It reports `request.ErrRequestBodyRead`.
 - `app/redis.go` used `Server.Host` instead of `Redis.Host`, so `redis.host` was ignored and the
   gateway dialed `127.0.0.1` — which cannot work inside the compose `app` container.
+- `RedisConfig` carried only host and port, so `app/redis.go` hardcoded `Password: ""` and `DB: 0`
+  behind `@todo env` comments: an authenticated redis, and any database other than 0, were
+  unreachable. `username`, `password` and `db` are configured now, and `RedisConfig.Addr()` joins
+  host and port the way `DBConfig.DSN()` renders the postgres string — the section renders its own
+  connection coordinates, so `redis.go` no longer imports `net` for it. None of the three new fields
+  are defaulted: an empty password is what an unauthenticated redis needs, and `0` is a real
+  database index rather than an unset one.
 - `pkg/request/call.go` returned `&s` on a range variable; it now builds an explicit `ServiceConfig`
   copy per match.
 - `app/server.go` dropped the `CancelFunc` from `context.WithTimeout`; it is now deferred.

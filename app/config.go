@@ -3,6 +3,7 @@ package app
 import (
 	"context"
 	"fmt"
+	"net"
 	"os"
 	"regexp"
 	"time"
@@ -29,9 +30,22 @@ type ServerConfig struct {
 }
 
 // RedisConfig is the cache backend configuration.
+//
+// Username and Password authenticate the client, and are empty against a redis
+// without authentication. DB is the database index, whose zero value is the
+// intended default rather than an unset one, so none of the three are defaulted
+// in withDefaults.
 type RedisConfig struct {
-	Host string `yaml:"host"`
-	Port string `yaml:"port"`
+	Host     string `yaml:"host"`
+	Port     string `yaml:"port"`
+	Username string `yaml:"username"`
+	Password string `yaml:"password"`
+	DB       int    `yaml:"db"`
+}
+
+// Addr renders the redis server address.
+func (c RedisConfig) Addr() string {
+	return net.JoinHostPort(c.Host, c.Port)
 }
 
 // DBConfig is the relational store configuration.
