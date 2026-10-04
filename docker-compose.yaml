@@ -9,6 +9,14 @@ services:
     environment:
       # the gateway reaches the database by service name inside the network
       DB_HOST: db
+    # bash is in the image and the probe needs no curl: it speaks HTTP over /dev/tcp.
+    # Liveness only, which is all /health reports.
+    healthcheck:
+      test: ['CMD', 'bash', '-c', 'exec 3<>/dev/tcp/127.0.0.1/8080 && printf "GET /health HTTP/1.0\r\n\r\n" >&3 && grep -q "200 OK" <&3']
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 5s
     networks:
       - goteway
     depends_on:

@@ -49,6 +49,15 @@ func NewCall(r *http.Request, servicesConfig ServicesConfig) (*Call, error) {
 
 	requestUrl := strings.Replace(r.URL.Path[1:], sc.Path, sc.Host, -1)
 
+	// r.URL.Path never carries the query, so it has to be appended by hand or
+	// the upstream is asked a different question than the client asked. The
+	// fingerprint below hashes the whole *url.URL, query included, so before
+	// this the gateway kept one cache entry per query string for requests the
+	// upstream could not tell apart.
+	if r.URL.RawQuery != "" {
+		requestUrl += "?" + r.URL.RawQuery
+	}
+
 	// generate key
 	var buf bytes.Buffer
 	encoder := base64.NewEncoder(base64.StdEncoding, &buf)
@@ -140,6 +149,13 @@ func (c *Call) Key() string {
 	return c.id
 }
 
+// validStatusCode is the range ResponseWriter.WriteHeader accepts. It is checked
+// against a decoded payload rather than trusted, so that the handler can write
+// the cached status without having to defend itself.
+func validStatusCode(code int) bool {
+	return code >= 100 && code <= 999
+}
+
 // Value serializes the upstream response for the cache. It reads the snapshot
 // taken when the response was attached, never the response body itself: that
 // body belongs to whoever is still streaming it to the client.
@@ -174,6 +190,16 @@ func (c *Call) SetValue(s string) error {
 
 	if err != nil {
 		return fmt.Errorf("%w: %v", ErrResponseDeserialization, err)
+	}
+
+	// The status is written straight to the ResponseWriter by the handler, which
+	// panics on a code outside this range. A payload that decodes but carries an
+	// impossible status is corrupt in exactly the same way an undecodable one
+	// is, so it is rejected here instead of becoming a panic per request until
+	// the entry expires.
+	if !validStatusCode(serialized.StatusCode) {
+		return fmt.Errorf("%w: status_code %d is not a status code",
+			ErrResponseDeserialization, serialized.StatusCode)
 	}
 
 	c.body = []byte(serialized.Body)
