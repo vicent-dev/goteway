@@ -21,7 +21,9 @@ func (s *server) routes() {
 	// catch-all, because a probe cannot hold a bearer token, and ahead of the
 	// service matching too: /health never reaches pkg/request, so it answers even
 	// with no services configured at all.
-	s.r.HandleFunc("/health", healthHandler()).Methods("GET")
+	health := healthHandler()
+	s.r.HandleFunc("/health", health).Methods("GET", "HEAD")
+	s.r.HandleFunc("/health/", health).Methods("GET", "HEAD")
 
 	// auth handler
 	authR := s.r.PathPrefix("/auth").Subrouter()

@@ -789,27 +789,42 @@ func TestCopyUpstreamHeaders(t *testing.T) {
 func TestHealthIsAnsweredWithoutAToken(t *testing.T) {
 	s := newTestServer(t, nil)
 
-	rec := doRequest(s, http.MethodGet, "/health", "")
+	for _, target := range []string{"/health", "/health/"} {
+		for _, method := range []string{http.MethodGet, http.MethodHead} {
 
-	assert.Equal(t, http.StatusOK, rec.Code)
-	assert.Equal(t, "application/json", rec.Header().Get("Content-Type"))
-	assert.JSONEq(t, `{"status":"ok"}`, rec.Body.String())
+			rec := doRequest(s, method, target, "")
+
+			assert.Equal(t, http.StatusOK, rec.Code, "%s %s", method, target)
+			assert.Equal(t, "application/json", rec.Header().Get("Content-Type"))
+			// net/http discards the body of a HEAD response, so it is only the
+			// GET spellings that can be compared.
+			if method == http.MethodGet {
+				assert.JSONEq(t, `{"status":"ok"}`, rec.Body.String(), "%s", target)
+			}
+		}
+	}
 }
 
 // TestHealthIsNotShadowedByAService documents a consequence of registering the
 // route ahead of the proxy: a service configured on the same path becomes
-// unreachable, because mux matches in registration order.
+// unreachable, because mux matches in registration order. The trailing slash
+// spelling is configured too, since it shadows the same way.
 func TestHealthIsNotShadowedByAService(t *testing.T) {
 	cfg := testConfig()
 	cfg.Services = ServicesConfig{
-		External: []Upstream{{Path: "health", Host: "unreachable.example.com:8000"}},
+		External: []Upstream{
+			{Path: "health", Host: "unreachable.example.com:8000"},
+			{Path: "health/", Host: "unreachable.example.com:8000"},
+		},
 	}
 	s := newTestServer(t, cfg)
 
-	rec := doRequest(s, http.MethodGet, "/health", "")
+	for _, target := range []string{"/health", "/health/"} {
+		rec := doRequest(s, http.MethodGet, target, "")
 
-	assert.Equal(t, http.StatusOK, rec.Code)
-	assert.JSONEq(t, `{"status":"ok"}`, rec.Body.String())
+		assert.Equal(t, http.StatusOK, rec.Code, target)
+		assert.JSONEq(t, `{"status":"ok"}`, rec.Body.String(), target)
+	}
 }
 
 // TestHealthIsLogged notes what a probe does cost: /health is registered on the

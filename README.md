@@ -367,24 +367,6 @@ is deliberately not used — it would read `${VAR:-default}` as a variable *name
 There is no environment override for a bare key — `${VAR}` works because it is
 written into the file, so add it yourself if you need it.
 
-### Tuned in code, not in config
-
-Deliberately or not, these are constants. Knowing where they are is the
-difference between tuning the gateway and wondering why it throttles you.
-
-| Behaviour | Value | Where |
-| --- | --- | --- |
-| Response cache TTL | `15s` | `pkg/cache/redis.go` |
-| Upstream request timeout | `10s` | `pkg/request/client.go` |
-| Rate limit | 5 rps, burst 10, **not wired up** — see [Limitations](#limitations) | `app/middleware.go` |
-| Health | `GET /health` → `200 {"status":"ok"}`, liveness only, no token | `app/health.go` |
-| Graceful shutdown drain | `10s` | `app/server.go` |
-| `ReadHeaderTimeout` | `10s` | `app/server.go` |
-| Redis password / database | `""` / `0`, hardcoded | `app/redis.go` |
-| Panic recovery | on (`handlers.RecoveryHandler`) | `app/server.go` |
-| Schema migration | `AutoMigrate` on every startup | `app/db.go` |
-
----
 
 ## Getting started
 

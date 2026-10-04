@@ -135,7 +135,7 @@ Deliberately not fixed yet, because fixing them means changing behaviour or addi
   forwarded.
 - `GET /health` is liveness only: it checks no dependency, so a gateway with every upstream down still
   reports healthy. It is registered ahead of the catch-all, so a service configured on the `health`
-  path is unreachable.
+  path (either spelling) is unreachable.
 - `server.host` is parsed into `Config` and then ignored: `http.Server.Addr` is `":" + Port`, so the
   listener always binds every interface.
 - `services.internal` and `services.external` are not a public/private split. `authMiddleware` guards
@@ -170,6 +170,12 @@ Already fixed (kept here so the reasoning is not lost):
 - `GET /health` (`app/health.go`) answers `200 {"status":"ok"}` with no token, registered on the root
   router ahead of the authenticated catch-all, which is what makes it reachable by a probe. It checks
   no dependency and no service, so it is liveness only; there is no readiness endpoint.
+- `/health` was reachable without a token but only as an exact `GET`, so `HEAD /health` and
+  `GET /health/` were answered `401 {"error":"unauthorized"}` by `authMiddleware`. A request that misses
+  a mux route is not refused — mux falls through to `PathPrefix("/")`, which matches any path *and* any
+  method, so a near-miss on the health path became an authentication failure rather than a health
+  answer. Both path spellings and both read methods are registered now. Anything else (`/healthz`, a
+  service on a deeper path) is still proxied and still needs a token.
 
 - Auth was a stub: `auth.IsValidToken` only checked that the `Authorization` header was non-empty,
   and `/auth/login` and `/auth/logout` were empty. It is now a real domain — gorm store, bcrypt, a

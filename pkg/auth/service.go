@@ -372,10 +372,19 @@ func (s *Service) IssueRegistrationToken(ctx context.Context, in IssueRegistrati
 
 // Authenticate verifies an access token and returns the caller it identifies.
 // It hits no storage: an access token is its own proof.
+//
+// Expiry is decided here, against the service clock, rather than left to the
+// parser. The parser validates against the process clock, which a test cannot
+// move, so relying on it alone makes the lifetime of a token untestable and
+// leaves s.now free to disagree with what actually happened.
 func (s *Service) Authenticate(bearer string) (*Principal, error) {
 	claims, err := s.issuer.Parse(bearer, KindAccess)
 	if err != nil {
 		return nil, err
+	}
+
+	if claims.IsExpired(s.now(), s.cfg.ClockSkew) {
+		return nil, ErrTokenExpired
 	}
 
 	userID, err := claims.UserID()

@@ -531,6 +531,27 @@ func TestAuthenticateRejectsBadTokens(t *testing.T) {
 	assert.ErrorIs(t, err, ErrInvalidToken)
 }
 
+func TestAuthenticateRejectsExpiredTokens(t *testing.T) {
+	svc, _ := newTestService(t)
+	session := registerUser(t, svc, "ada@example.com", "supersecret")
+	issuedAt := testNow
+
+	// Inside the leeway the token is still good: expiry plus the configured
+	// clock skew is what ends a session, not the expiry alone.
+	svc.now = func() time.Time { return session.AccessExpiresAt }
+	principal, err := svc.Authenticate(session.AccessToken)
+	require.NoError(t, err)
+	assert.Equal(t, session.User.ID, principal.UserID)
+
+	svc.now = func() time.Time { return session.AccessExpiresAt.Add(svc.cfg.ClockSkew) }
+	_, err = svc.Authenticate(session.AccessToken)
+	assert.ErrorIs(t, err, ErrTokenExpired)
+
+	svc.now = func() time.Time { return issuedAt.Add(svc.cfg.AccessTTL + time.Hour) }
+	_, err = svc.Authenticate(session.AccessToken)
+	assert.ErrorIs(t, err, ErrTokenExpired)
+}
+
 func TestServicePropagatesStoreFailures(t *testing.T) {
 	boom := errors.New("database is unreachable")
 

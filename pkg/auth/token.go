@@ -38,6 +38,20 @@ func (c *Claims) UserID() (uint, error) {
 	return uint(id), nil
 }
 
+// IsExpired reports whether the token is past its expiry at now, allowing
+// leeway for clock skew exactly as the parser does: a token stays valid until
+// its expiry plus leeway has passed.
+//
+// A token carrying no expiry claim counts as expired. Every token this package
+// issues has one, so this only rejects a signature that cannot be shown to
+// still be live, instead of accepting it forever.
+func (c *Claims) IsExpired(now time.Time, leeway time.Duration) bool {
+	if c.ExpiresAt == nil {
+		return true
+	}
+	return !now.Before(c.ExpiresAt.Add(leeway))
+}
+
 // RequestMeta is the client metadata stored alongside an issued session.
 type RequestMeta struct {
 	UserAgent string
