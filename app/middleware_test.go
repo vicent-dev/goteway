@@ -61,6 +61,17 @@ func TestRateLimiterMiddleware_AllowsRequests(t *testing.T) {
 	assert.Equal(t, http.StatusOK, rec.Code)
 }
 
+// TestRateLimiterMiddleware_Throttle exercises the middleware the way the
+// standalone test above does, by calling the built handler directly.
+//
+// It does not describe the running server, and it should not be read as if it
+// did: gorilla/mux calls each registered Middleware func again on every matched
+// request (Router.Match builds the chain per request), so the limiter in
+// rateLimiterMiddleware is rebuilt per request and no request is ever refused.
+// This test still throttles because here the constructor runs once. Fixing the
+// wiring means moving the limiter out of the constructor, which makes this test
+// pass for the wrong reason until it is updated — see the known issue in
+// AGENTS.md.
 func TestRateLimiterMiddleware_Throttle(t *testing.T) {
 	next := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)

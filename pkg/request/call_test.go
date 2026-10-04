@@ -126,6 +126,65 @@ func TestNewCall_PathRewrite(t *testing.T) {
 	assert.Equal(t, "backend.example.com/v1/users/123", call.requestUrl)
 }
 
+// TestNewCall_PathRewriteKeepsTheQuery covers the query string, which
+// r.URL.Path never carries: without it appended, the upstream is asked a
+// different question than the client asked.
+func TestNewCall_PathRewriteKeepsTheQuery(t *testing.T) {
+	services := ServicesConfig{
+		External: []ServiceConfig{
+			{Path: "api", Host: "backend.example.com/v1"},
+		},
+	}
+
+	req, err := http.NewRequest("GET", "http://gateway/api/users?page=2&sort=name", nil)
+	assert.NoError(t, err)
+
+	call, err := NewCall(req, services)
+	assert.NoError(t, err)
+	assert.Equal(t, "backend.example.com/v1/users?page=2&sort=name", call.requestUrl)
+}
+
+// TestNewCall_PathRewriteWithoutAQuery pins the empty case: appending
+// unconditionally would leave a bare "?" on every request that has no query.
+func TestNewCall_PathRewriteWithoutAQuery(t *testing.T) {
+	services := ServicesConfig{
+		External: []ServiceConfig{{Path: "api", Host: "backend.example.com"}},
+	}
+
+	req, err := http.NewRequest("GET", "http://gateway/api/users", nil)
+	assert.NoError(t, err)
+
+	call, err := NewCall(req, services)
+	assert.NoError(t, err)
+	assert.Equal(t, "backend.example.com/users", call.requestUrl)
+	assert.NotContains(t, call.requestUrl, "?")
+}
+
+// TestNewCall_QueryDoesNotChangeTheMatch pins the other half: the query travels
+// with the rewritten URL, never with the prefix that decides which service
+// answers.
+func TestNewCall_QueryDoesNotChangeTheMatch(t *testing.T) {
+	services := ServicesConfig{
+		External: []ServiceConfig{{Path: "api", Host: "backend.example.com"}},
+	}
+
+	withQuery, err := http.NewRequest("GET", "http://gateway/api/users?page=2", nil)
+	require.NoError(t, err)
+	withoutQuery, err := http.NewRequest("GET", "http://gateway/api/users", nil)
+	require.NoError(t, err)
+
+	first, err := NewCall(withQuery, services)
+	require.NoError(t, err)
+	second, err := NewCall(withoutQuery, services)
+	require.NoError(t, err)
+
+	assert.Equal(t, "backend.example.com", first.requestUrl[:len("backend.example.com")])
+	assert.Equal(t, second.requestUrl, first.requestUrl[:len(second.requestUrl)],
+		"both requests hit the same upstream path")
+	assert.NotEqual(t, first.Key(), second.Key(),
+		"different queries are different requests, and cache separately")
+}
+
 func TestNewCall_ServiceNotFound(t *testing.T) {
 	services := ServicesConfig{}
 	req, err := http.NewRequest("GET", "http://gateway/unknown", nil)
@@ -261,6 +320,23 @@ func TestCall_SetValueRejectsACorruptEntry(t *testing.T) {
 	// corrupted entry cannot be mistaken for an empty response.
 	assert.ErrorIs(t, call.SetValue("not json"), ErrResponseDeserialization)
 	assert.Nil(t, call.Response)
+}
+
+// TestCall_SetValueRejectsAnImpossibleStatus is the codec half of trusting a
+// cached status: the handler hands it to ResponseWriter.WriteHeader, which
+// panics outside 100-999, so a payload that decodes but carries an impossible
+// code is corrupt in the same way an undecodable one is.
+func TestCall_SetValueRejectsAnImpossibleStatus(t *testing.T) {
+	for _, payload := range []string{
+		`{"status":"","status_code":0}`,
+		`{"status":"","status_code":99}`,
+		`{"status":"","status_code":1000}`,
+		`{"status":"","status_code":-1}`,
+	} {
+		call := &Call{}
+		assert.ErrorIs(t, call.SetValue(payload), ErrResponseDeserialization, payload)
+		assert.Nil(t, call.Response, payload)
+	}
 }
 
 func TestCall_ValueSetValueRoundTrip(t *testing.T) {

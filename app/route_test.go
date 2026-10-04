@@ -620,3 +620,212 @@ func TestWriteRequestErrorHidesTheCause(t *testing.T) {
 	assert.NotContains(t, rec.Body.String(), "internal.example.com")
 	assert.NotContains(t, rec.Body.String(), "connection refused")
 }
+
+// TestProxyForwardsTheUpstreamStatus is the regression test for the missing
+// WriteHeader: an upstream that answers 404 or 500 must reach the caller as one,
+// not as a 200 carrying the same body.
+func TestProxyForwardsTheUpstreamStatus(t *testing.T) {
+	tests := []struct {
+		name   string
+		status int
+		body   string
+	}{
+		{"created", http.StatusCreated, `{"id": 1}`},
+		{"not found", http.StatusNotFound, `{"error": "no such user"}`},
+		{"server error", http.StatusInternalServerError, `{"error": "boom"}`},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				w.WriteHeader(tt.status)
+				_, _ = w.Write([]byte(tt.body))
+			}))
+			defer upstream.Close()
+
+			cfg := testConfig()
+			cfg.Services = ServicesConfig{
+				External: []Upstream{{Path: "public", Host: upstream.URL[len("http://"):]}},
+			}
+			s := newTestServer(t, cfg)
+			session := register(t, s, "ada@example.com")
+
+			rec := doRequestAs(s, http.MethodGet, "/public/thing", "", session.AccessToken)
+
+			assert.Equal(t, tt.status, rec.Code)
+			assert.Equal(t, tt.body, rec.Body.String())
+		})
+	}
+}
+
+// TestProxyReplaysTheCachedStatus covers the same ground through the cache: a hit
+// restores the status it stored, so the second request cannot answer 200 where
+// the first answered 418.
+func TestProxyReplaysTheCachedStatus(t *testing.T) {
+	var hits atomic.Int64
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		hits.Add(1)
+		w.WriteHeader(http.StatusTeapot)
+		_, _ = w.Write([]byte(`{"brew": "coffee"}`))
+	}))
+	defer upstream.Close()
+
+	cfg := testConfig()
+	cfg.Services = ServicesConfig{
+		External: []Upstream{{Path: "public", Host: upstream.URL[len("http://"):]}},
+	}
+	s := newTestServer(t, cfg)
+	session := register(t, s, "ada@example.com")
+
+	first := doRequestAs(s, http.MethodGet, "/public/thing", "", session.AccessToken)
+	require.Equal(t, http.StatusTeapot, first.Code)
+
+	// The write lands on its own goroutine, so the second request is only about
+	// the cache once the entry is actually there.
+	require.Eventually(t, func() bool {
+		keys, err := s.rdb.Keys(t.Context(), "*").Result()
+		return err == nil && len(keys) > 0
+	}, time.Second, 5*time.Millisecond, "the response was never cached")
+
+	second := doRequestAs(s, http.MethodGet, "/public/thing", "", session.AccessToken)
+
+	assert.Equal(t, http.StatusTeapot, second.Code)
+	assert.Equal(t, `{"brew": "coffee"}`, second.Body.String())
+	assert.Equal(t, int64(1), hits.Load(), "the second response came from the cache")
+}
+
+// TestProxyDropsTheUpstreamConnectionHeaders is the response half of the
+// forwarding rule: Transfer-Encoding and friends describe the hop to the
+// upstream, and copied onto a body this handler has buffered they describe a
+// connection that does not exist.
+func TestProxyDropsTheUpstreamConnectionHeaders(t *testing.T) {
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Connection", "close")
+		w.Header().Set("Keep-Alive", "timeout=5")
+		w.Header().Set("Upgrade", "h2c")
+		w.Header().Set("X-Upstream", "yes")
+		_, _ = w.Write([]byte(`{"hello":"world"}`))
+	}))
+	defer upstream.Close()
+
+	cfg := testConfig()
+	cfg.Services = ServicesConfig{
+		External: []Upstream{{Path: "public", Host: upstream.URL[len("http://"):]}},
+	}
+	s := newTestServer(t, cfg)
+	session := register(t, s, "ada@example.com")
+
+	rec := doRequestAs(s, http.MethodGet, "/public/thing", "", session.AccessToken)
+
+	assert.Equal(t, http.StatusOK, rec.Code)
+	assert.Equal(t, `{"hello":"world"}`, rec.Body.String())
+	assert.Equal(t, "yes", rec.Header().Get("X-Upstream"))
+	for _, name := range []string{"Connection", "Keep-Alive", "Upgrade"} {
+		assert.Empty(t, rec.Header().Get(name), "%s is scoped to one connection", name)
+	}
+}
+
+// TestProxyForwardsTheQueryString is the caller-visible half of the rewrite fix.
+func TestProxyForwardsTheQueryString(t *testing.T) {
+	var seen string
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		seen = r.URL.RequestURI()
+		_, _ = w.Write([]byte(`ok`))
+	}))
+	defer upstream.Close()
+
+	cfg := testConfig()
+	cfg.Services = ServicesConfig{
+		External: []Upstream{{Path: "public", Host: upstream.URL[len("http://"):]}},
+	}
+	s := newTestServer(t, cfg)
+	session := register(t, s, "ada@example.com")
+
+	rec := doRequestAs(s, http.MethodGet, "/public/search?q=goteway&page=2", "", session.AccessToken)
+
+	assert.Equal(t, http.StatusOK, rec.Code)
+	assert.Equal(t, "/search?q=goteway&page=2", seen)
+}
+
+// TestCopyUpstreamHeaders is a unit test because the round trip hides most of
+// the list: net/http's own client strips Transfer-Encoding and whatever the
+// Connection header names before the gateway ever sees them, so only a direct
+// call can prove the rule.
+func TestCopyUpstreamHeaders(t *testing.T) {
+	src := http.Header{
+		"Content-Type":        {"application/json"},
+		"Content-Length":      {"17"},
+		"X-Upstream":          {"yes"},
+		"Set-Cookie":          {"a=1"},
+		"Connection":          {"close"},
+		"Keep-Alive":          {"timeout=5"},
+		"Proxy-Authorization": {"Basic something"},
+		"Transfer-Encoding":   {"chunked"},
+		"Upgrade":             {"websocket"},
+	}
+	dst := http.Header{}
+
+	copyUpstreamHeaders(dst, src)
+
+	assert.Equal(t, "application/json", dst.Get("Content-Type"))
+	assert.Equal(t, "yes", dst.Get("X-Upstream"))
+	assert.Equal(t, "a=1", dst.Get("Set-Cookie"))
+	for _, name := range []string{
+		"Content-Length", "Connection", "Keep-Alive", "Proxy-Authorization",
+		"Transfer-Encoding", "Upgrade",
+	} {
+		assert.Empty(t, dst.Get(name), "%s must not cross the gateway", name)
+	}
+
+	// The source belongs to the call, and the cache serializes it, so copying
+	// must not take anything away from it.
+	assert.Equal(t, "chunked", src.Get("Transfer-Encoding"))
+}
+
+// TestHealthIsAnsweredWithoutAToken is the point of registering /health on the
+// root router ahead of the catch-all: a probe holds no credentials. It also
+// covers having no services configured at all, since health never reaches the
+// service matching.
+func TestHealthIsAnsweredWithoutAToken(t *testing.T) {
+	s := newTestServer(t, nil)
+
+	rec := doRequest(s, http.MethodGet, "/health", "")
+
+	assert.Equal(t, http.StatusOK, rec.Code)
+	assert.Equal(t, "application/json", rec.Header().Get("Content-Type"))
+	assert.JSONEq(t, `{"status":"ok"}`, rec.Body.String())
+}
+
+// TestHealthIsNotShadowedByAService documents a consequence of registering the
+// route ahead of the proxy: a service configured on the same path becomes
+// unreachable, because mux matches in registration order.
+func TestHealthIsNotShadowedByAService(t *testing.T) {
+	cfg := testConfig()
+	cfg.Services = ServicesConfig{
+		External: []Upstream{{Path: "health", Host: "unreachable.example.com:8000"}},
+	}
+	s := newTestServer(t, cfg)
+
+	rec := doRequest(s, http.MethodGet, "/health", "")
+
+	assert.Equal(t, http.StatusOK, rec.Code)
+	assert.JSONEq(t, `{"status":"ok"}`, rec.Body.String())
+}
+
+// TestHealthIsLogged notes what a probe does cost: /health is registered on the
+// root router, so it goes through loggingMiddleware like everything else.
+//
+// It is deliberately not asserted here that the rate limiter applies either.
+// gorilla/mux rebuilds the middleware chain per matched request (Router.Match
+// calls each Middleware func again), so rateLimiterMiddleware's limiter is
+// constructed per request and every request starts from a full bucket. Health is
+// throttled by nothing today, for the same reason no route is. That is a known
+// bug, recorded in AGENTS.md, and a test asserting the broken behaviour would
+// only have to be deleted when it is fixed.
+func TestHealthIsLogged(t *testing.T) {
+	s := newTestServer(t, nil)
+
+	rec := doRequest(s, http.MethodGet, "/health", "")
+
+	assert.Equal(t, http.StatusOK, rec.Code)
+}

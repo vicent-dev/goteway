@@ -49,7 +49,8 @@ Module path is `goteway` (the typo is intentional), so internal imports are `got
 
 1. `loggingMiddleware` stamps method and path onto the context; it also emits
    the access log after the handler returns.
-2. `rateLimiterMiddleware` is a global 5 rps / burst 10 limiter (see Known issues).
+2. `rateLimiterMiddleware` is meant to be a global 5 rps / burst 10 limiter; it is in fact a no-op
+   (see Known issues). `GET /health` is answered right here on the root router, before the catch-all.
 3. `/auth/{register,login,refresh,logout}` go to `app/auth_handlers.go`; anything else is guarded by
    `authMiddleware` and falls through to `defaultRouteHandler`, which builds a cache-backed
    `request.Client` once at route-registration time.
@@ -118,20 +119,57 @@ The pattern `pkg/auth` established, which the rest of the codebase follows:
 
 Deliberately not fixed yet, because fixing them means changing behaviour or adding features:
 
-- The rate limiter is a single global bucket, not per-client, and 5 rps will throttle almost all
-  real traffic — increase it or move it to a per-IP `rate.Limiter` before treating it as protection.
+- The rate limiter does nothing at all: `rateLimiterMiddleware` builds `rate.NewLimiter(5, 10)` inside
+  the middleware constructor, and gorilla/mux calls that constructor again on every matched request
+  (`Router.Match` rebuilds the chain per request). Every request gets a fresh full bucket, so `Allow()`
+  never returns false and no `429` has ever been sent. `TestRateLimiterMiddleware_Throttle` passes
+  only because it calls the built handler directly. Hoisting the limiter to server state is the fix;
+  it should then become per-client rather than one global 5 rps bucket, which would throttle almost
+  all real traffic.
 - Responses are cached regardless of method, so non-idempotent requests can be served stale.
-- `Client.Request` does not forward the caller's headers to the upstream, so `Authorization`,
-  `Content-Type` and cookies never reach it. `NewCall` also deletes `Date` from the live header map,
-  which the handler then sees.
-- The upstream request is built with `http.NewRequest`, not `NewRequestWithContext`, so a client
-  disconnect does not cancel the call in flight.
+- `NewCall` deletes `Date` from the caller's live header map, which the handler then sees. Forwarding
+  now clones the map, so the deletion is contained, but the handler still observes the missing header.
+- The caller's `Authorization` is deliberately not forwarded upstream, and nothing replaces it, so a
+  service behind the gateway cannot tell which caller it is serving.
+- `defaultRouteHandler` buffers the body, so the upstream's `Content-Length` is dropped rather than
+  forwarded.
+- `GET /health` is liveness only: it checks no dependency, so a gateway with every upstream down still
+  reports healthy. It is registered ahead of the catch-all, so a service configured on the `health`
+  path is unreachable.
+- `server.host` is parsed into `Config` and then ignored: `http.Server.Addr` is `":" + Port`, so the
+  listener always binds every interface.
+- `services.internal` and `services.external` are not a public/private split. `authMiddleware` guards
+  the whole proxy, so both lists require an access token; the lists differ only in who wins a tie in
+  `findServiceConfigForUri`, where external wins an equal-depth tie.
 - `ServicesConfig` has no `Validate()`, unlike `auth.Config`: a malformed host is discovered per
   request as a 500 rather than at startup.
 - Redis password and DB are hardcoded to `""` / `0` in `app/redis.go`.
+- `docker-compose.yaml` forwards only `DB_HOST` to `app`, while `${VAR}` in the embedded config is
+  expanded from the *container's* environment at start-up — so exporting `AUTH_ACCESS_SECRET` in the
+  host shell has no effect until it is added to the `app` service's `environment:` block.
 - `go.sum` is listed in `.gitignore`, which is wrong for a module that is built in CI/Docker.
 
 Already fixed (kept here so the reasoning is not lost):
+
+- Every proxied response reached the client as `200 OK`: `defaultRouteHandler` copied the upstream
+  headers and body but never called `w.WriteHeader`. It does now, on both the live and the cached
+  path — a cache hit restores the status it stored, so the two are identical. `Call.SetValue`
+  rejects a cached status outside 100-999, because `WriteHeader` panics there and a payload that
+  decodes into an impossible code is corrupt in the same way an undecodable one is.
+- Request headers were dropped entirely: `Client.Request` built the upstream request from the method,
+  URL and body only. It clones the caller's headers now, strips the hop-by-hop set and the gateway's
+  own bearer, and forwards the rest. `app.copyUpstreamHeaders` does the same on the way back.
+- `Call.requestUrl` was built from `r.URL.Path` only, so the query string never reached the upstream
+  even though `r.URL` — which does carry it — was serialized into the cache key, giving `?page=2` its
+  own entry for a byte-identical upstream request. The query is appended after the rewrite, only when
+  non-empty, so no request grows a bare `?`.
+- The upstream request was built with `http.NewRequest`, not `NewRequestWithContext`, so a client
+  disconnect did not cancel the call in flight. It is attached now. The asynchronous cache write is
+  deliberately the exception: it runs with `context.WithoutCancel(ctx)` so a caller who hangs up after
+  the response was fetched whole does not throw it away.
+- `GET /health` (`app/health.go`) answers `200 {"status":"ok"}` with no token, registered on the root
+  router ahead of the authenticated catch-all, which is what makes it reachable by a probe. It checks
+  no dependency and no service, so it is liveness only; there is no readiness endpoint.
 
 - Auth was a stub: `auth.IsValidToken` only checked that the `Authorization` header was non-empty,
   and `/auth/login` and `/auth/logout` were empty. It is now a real domain — gorm store, bcrypt, a

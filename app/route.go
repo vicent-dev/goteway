@@ -5,6 +5,7 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"strings"
 
 	"goteway/pkg/auth"
 	"goteway/pkg/cache"
@@ -15,6 +16,12 @@ import (
 func (s *server) routes() {
 	s.r.Use(loggingMiddleware)
 	s.r.Use(rateLimiterMiddleware)
+
+	// health handler. Registered on the root router ahead of the authenticated
+	// catch-all, because a probe cannot hold a bearer token, and ahead of the
+	// service matching too: /health never reaches pkg/request, so it answers even
+	// with no services configured at all.
+	s.r.HandleFunc("/health", healthHandler()).Methods("GET")
 
 	// auth handler
 	authR := s.r.PathPrefix("/auth").Subrouter()
@@ -54,15 +61,31 @@ func (s *server) defaultRouteHandler() http.Handler {
 			log.LogError(ctx, "reading the upstream response: "+err.Error())
 		}
 
-		for hn, hvs := range call.Response.Header {
-			w.Header().Del(hn)
-			for _, hv := range hvs {
-				w.Header().Add(hn, hv)
-			}
-		}
+		copyUpstreamHeaders(w.Header(), call.Response.Header)
 
+		// Written rather than left implicit: an upstream 404 or 500 has to reach
+		// the caller as one instead of being flattened into a 200. It is the same
+		// value on both paths, because a cache hit restores the status it stored.
+		w.WriteHeader(call.Response.StatusCode)
 		w.Write(body)
 	})
+}
+
+// copyUpstreamHeaders copies the upstream response headers onto the response the
+// client will receive, minus the ones that describe the connection the upstream
+// used. That connection does not exist on this side, and forwarding its framing
+// next to a body that has been buffered produces a response the client cannot
+// parse. Content-Length goes for the same reason: the length of what is written
+// is this handler's to declare, not the upstream's to be copied.
+func copyUpstreamHeaders(dst, src http.Header) {
+	for name, values := range src {
+		if request.IsHopByHop(name) || strings.EqualFold(name, "Content-Length") {
+			continue
+		}
+		for _, value := range values {
+			dst.Add(name, value)
+		}
+	}
 }
 
 // writeRequestError maps a proxy error to the status that describes it, the
