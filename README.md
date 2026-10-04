@@ -47,7 +47,3 @@ make genregtoken   # or: go run ./cmd/admin/genregtoken -issued-by alice
 ```
 
 The token is printed once and only its hash is stored.
-
-WIP:
-- Per-service auth rules (today the whole proxy requires a token)
-- K8s integration
