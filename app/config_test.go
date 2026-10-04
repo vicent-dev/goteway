@@ -78,6 +78,7 @@ func TestConfigDefaults(t *testing.T) {
 	c := (&Config{}).withDefaults()
 
 	assert.Equal(t, "8080", c.Server.Port)
+	assert.Equal(t, "local", c.Server.Env)
 	assert.Equal(t, "6379", c.Redis.Port)
 	assert.Equal(t, 100, c.DB.MaxConns)
 	assert.Equal(t, 10, c.DB.MaxIdle)
@@ -178,15 +179,46 @@ func TestConfigAuthConfigMapping(t *testing.T) {
 }
 
 func TestLoadConfig(t *testing.T) {
+	t.Setenv("ENV", "test")
 	c, err := LoadConfig()
 
 	require.NoError(t, err)
 	require.NotNil(t, c)
 	assert.NotEmpty(t, c.Server.Port)
+	assert.Equal(t, "test", c.Server.Env)
 	assert.NotEmpty(t, c.Redis.Port)
 	assert.Equal(t, net.JoinHostPort(c.Redis.Host, c.Redis.Port), c.Redis.Addr())
 	assert.GreaterOrEqual(t, c.Redis.DB, 0)
 
 	// The shipped configuration has to yield a usable auth domain.
 	require.NoError(t, c.AuthConfig().Validate())
+}
+
+func TestTLSEnabled(t *testing.T) {
+	tests := []struct {
+		name string
+		env  string
+		want bool
+	}{
+		{name: "local", env: "local", want: false},
+		{name: "test", env: "test", want: false},
+		{name: "LOCAL uppercase", env: "LOCAL", want: false},
+		{name: "TEST uppercase", env: "TEST", want: false},
+		{name: "dev", env: "dev", want: true},
+		{name: "staging", env: "staging", want: true},
+		{name: "production", env: "production", want: true},
+		{name: "prod", env: "prod", want: true},
+		{name: "other", env: "qa", want: true},
+		{name: "empty defaults treated via config", env: "", want: false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			c := Config{Server: ServerConfig{Env: tt.env}}
+			if tt.env == "" {
+				c = c.withDefaults()
+			}
+			assert.Equal(t, tt.want, c.TLSEnabled())
+		})
+	}
 }

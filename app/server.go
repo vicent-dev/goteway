@@ -90,7 +90,18 @@ func (s *server) Run(ctx context.Context) error {
 	errCh := make(chan error, 1)
 
 	go func() {
-		if err := s.httpServer.ListenAndServe(); err != http.ErrServerClosed {
+		var err error
+		if s.c.TLSEnabled() {
+			if s.c.Server.CertFile == "" || s.c.Server.KeyFile == "" {
+				errCh <- fmt.Errorf("tls enabled but cert_file or key_file missing")
+				close(errCh)
+				return
+			}
+			err = s.httpServer.ListenAndServeTLS(s.c.Server.CertFile, s.c.Server.KeyFile)
+		} else {
+			err = s.httpServer.ListenAndServe()
+		}
+		if err != nil && err != http.ErrServerClosed {
 			errCh <- err
 		}
 		close(errCh)
