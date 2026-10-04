@@ -24,11 +24,11 @@ func TestFindServiceConfigForUri(t *testing.T) {
 	}
 
 	tests := []struct {
-		name                string
-		uri                 string
-		wantService         *ServiceConfig
-		wantIsInternal      bool
-		description         string
+		name           string
+		uri            string
+		wantService    *ServiceConfig
+		wantIsInternal bool
+		description    string
 	}{
 		{
 			name:           "external exact match",

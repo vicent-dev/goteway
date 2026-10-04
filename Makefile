@@ -1,5 +1,5 @@
 install:
-	go mod tidy && go get goteway
+	go mod tidy
 
 run:
 	go run ./cmd/server/main.go
@@ -15,6 +15,11 @@ watch:
 
 opencode:
 	docker exec -it opencode opencode
+
+# mint a one time registration token
+genregtoken:
+	go run ./cmd/admin/genregtoken -issued-by cli
+
 test:
 	go test -v ./...
 

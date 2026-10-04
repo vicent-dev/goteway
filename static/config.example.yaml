@@ -15,3 +15,25 @@ services:
   external:
     - path: dumb-service 
       host: localhost:8000/external
+db:
+  host: ${DB_HOST:-localhost}
+  port: ${DB_PORT:-5432}
+  user: ${DB_USER:-goteway}
+  password: ${DB_PASSWORD:-goteway}
+  name: ${DB_NAME:-goteway}
+  sslmode: ${DB_SSLMODE:-disable}
+  max_conns: 100
+  max_idle: 10
+
+auth:
+  access_secret: ${AUTH_ACCESS_SECRET:-change-me-access}
+  refresh_secret: ${AUTH_REFRESH_SECRET:-change-me-refresh}
+  access_ttl: 15m
+  refresh_ttl: 168h
+  # how long a token minted by `make genregtoken` stays valid
+  registration_token_ttl: 24h
+  issuer: ${AUTH_ISSUER:-goteway}
+  audience: ${AUTH_AUDIENCE:-goteway-clients}
+  bcrypt_cost: 12
+  # leeway allowed on token time checks
+  clock_skew: 5s

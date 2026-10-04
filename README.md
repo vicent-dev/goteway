@@ -10,6 +10,7 @@ Gateway made in Go.
 - Microservices simple configuration
 - Graceful SIGKILL
 - Rate limited to mitigate ddos attacks
+- Postgres backed auth: register, login, refresh with rotation, logout
 
 ```bash 
 # static/config.yaml
@@ -26,6 +27,27 @@ services:
       host: localhost:8000/external
 ```
 
+## Auth
+
+The gateway owns its users. Tables are created on startup, so PostgreSQL has to be reachable.
+
+| Endpoint                | What it does                                                        |
+| ----------------------- | ------------------------------------------------------------------- |
+| `POST /auth/register`   | Consumes a one-time registration token and creates the user          |
+| `POST /auth/login`      | Returns an access/refresh pair                                       |
+| `POST /auth/refresh`    | Rotates the refresh token; replaying an old one revokes every session |
+| `POST /auth/logout`     | Revokes a refresh token, always answering `204`                      |
+
+Every proxied path requires `Authorization: Bearer <access token>`.
+
+Registrations need a registration token, minted by an operator:
+
+```bash
+make genregtoken   # or: go run ./cmd/admin/genregtoken -issued-by alice
+```
+
+The token is printed once and only its hash is stored.
+
 WIP:
-- Auth system built in
+- Per-service auth rules (today the whole proxy requires a token)
 - K8s integration

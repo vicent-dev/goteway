@@ -1,10 +1,13 @@
 package app
 
 import (
+	"io"
+	"net"
+	"net/http"
+
+	"goteway/pkg/auth"
 	"goteway/pkg/cache"
 	"goteway/pkg/request"
-	"io"
-	"net/http"
 )
 
 func (s *server) routes() {
@@ -14,19 +17,23 @@ func (s *server) routes() {
 	// auth handler
 	authR := s.r.PathPrefix("/auth").Subrouter()
 	authR.Use(jsonMiddleware)
+	authR.PathPrefix("/register").HandlerFunc(s.registerHandler()).Methods("POST")
 	authR.PathPrefix("/login").HandlerFunc(s.loginHandler()).Methods("POST")
 	authR.PathPrefix("/logout").HandlerFunc(s.logoutHandler()).Methods("POST")
+	authR.PathPrefix("/refresh").HandlerFunc(s.refreshHandler()).Methods("POST")
 
-	// default router handler
-	s.r.PathPrefix("/").HandlerFunc(s.defaultRouteHandler())
+	// Everything else is proxied, and requires a verified access token:
+	// whether a route additionally demands one is decided per service by the
+	// request package, from the principal in the context.
+	s.r.PathPrefix("/").Handler(s.authMiddleware(s.defaultRouteHandler()))
 }
 
-func (s *server) defaultRouteHandler() func(http.ResponseWriter, *http.Request) {
+func (s *server) defaultRouteHandler() http.Handler {
 
-	cache := cache.NewRedis[*request.Call](s.rdb)
-	client := request.NewClient(&cache, s.c.convertServicesToRequest())
+	responseCache := cache.NewRedis[*request.Call](s.rdb)
+	client := request.NewClient(&responseCache, s.c.convertServicesToRequest())
 
-	return func(w http.ResponseWriter, r *http.Request) {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		ctx := r.Context()
 
 		call, statusCode, err := client.Request(ctx, w, r)
@@ -49,15 +56,24 @@ func (s *server) defaultRouteHandler() func(http.ResponseWriter, *http.Request) 
 		w.Write(body)
 
 		ctx.Done()
+	})
+}
+
+// requestMeta describes the caller for the session records the auth domain
+// stores, so a session can be traced back to the client that created it.
+func requestMeta(r *http.Request) auth.RequestMeta {
+	return auth.RequestMeta{
+		UserAgent: r.UserAgent(),
+		IP:        remoteIP(r),
 	}
 }
 
-func (s *server) loginHandler() func(http.ResponseWriter, *http.Request) {
-	return func(w http.ResponseWriter, r *http.Request) {
+// remoteIP is the client address without the port, which is what the persisted
+// varchar(45) column can hold.
+func remoteIP(r *http.Request) string {
+	host, _, err := net.SplitHostPort(r.RemoteAddr)
+	if err != nil {
+		return r.RemoteAddr
 	}
-}
-
-func (s *server) logoutHandler() func(http.ResponseWriter, *http.Request) {
-	return func(w http.ResponseWriter, r *http.Request) {
-	}
+	return host
 }

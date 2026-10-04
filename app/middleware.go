@@ -2,12 +2,12 @@ package app
 
 import (
 	"context"
-	"encoding/json"
-	"goteway/pkg/auth"
-	"goteway/pkg/log"
 	"net/http"
 
 	"golang.org/x/time/rate"
+
+	"goteway/pkg/auth"
+	"goteway/pkg/log"
 )
 
 func loggingMiddleware(next http.Handler) http.Handler {
@@ -15,7 +15,6 @@ func loggingMiddleware(next http.Handler) http.Handler {
 
 		ctx := context.WithValue(r.Context(), log.METHOD_CTX_LOG_KEY, r.Method)
 		ctx = context.WithValue(ctx, log.PATH_CTX_LOG_KEY, r.URL.Path)
-		ctx = context.WithValue(ctx, auth.AUTH_CTX_KEY, r.Header.Get(auth.BEARER_TOKEN_HEADER_KEY))
 
 		r = r.WithContext(ctx)
 		next.ServeHTTP(w, r)
@@ -26,7 +25,7 @@ func loggingMiddleware(next http.Handler) http.Handler {
 
 func jsonMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Add("Content-Type", "application/json")
+		w.Header().Set("Content-Type", "application/json")
 		next.ServeHTTP(w, r)
 	})
 }
@@ -35,13 +34,22 @@ func rateLimiterMiddleware(next http.Handler) http.Handler {
 	limiter := rate.NewLimiter(5, 10)
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if !limiter.Allow() {
-			w.Header().Add("Content-Type", "application/json")
-			w.WriteHeader(http.StatusTooManyRequests)
-			byteResponse, _ := json.Marshal(map[string]string{"error": "rate limit reached"})
-			_, _ = w.Write(byteResponse)
+			writeErrorResponse(w, map[string]any{"error": "rate limit reached"}, http.StatusTooManyRequests)
 			return
-		} else {
-			next.ServeHTTP(w, r)
 		}
+		next.ServeHTTP(w, r)
 	})
+}
+
+// authMiddleware guards the proxy with a verified access token.
+//
+// The authentication itself lives in pkg/auth, which decides who the caller is;
+// the gateway only decides how a rejection is rendered.
+func (s *server) authMiddleware(next http.Handler) http.Handler {
+	return auth.RequireAuth(s.authService(), unauthorizedResponse)(next)
+}
+
+func unauthorizedResponse(w http.ResponseWriter, r *http.Request, err error) {
+	log.LogInfo(r.Context(), "unauthorized: "+err.Error())
+	writeErrorResponse(w, map[string]any{"error": "unauthorized"}, http.StatusUnauthorized)
 }

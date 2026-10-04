@@ -39,8 +39,10 @@ func (c *Client) Request(ctx context.Context, httpW http.ResponseWriter, httpR *
 		return nil, http.StatusBadRequest, err
 	}
 
-	if call.isInternal && !auth.IsValidToken(ctx) {
-		return nil, http.StatusUnauthorized, errors.New("access denied")
+	if call.isInternal {
+		if _, ok := auth.PrincipalFromContext(ctx); !ok {
+			return nil, http.StatusUnauthorized, errors.New("access denied")
+		}
 	}
 
 	// get response from cache
