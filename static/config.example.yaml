@@ -1,6 +1,9 @@
 server:
   host: 127.0.0.1
   port: 8080
+  env: ${ENV:-local}
+  cert_file: ${TLS_CERT_FILE:-}
+  key_file: ${TLS_KEY_FILE:-}
 redis:
   host: redis
   port: 6379

@@ -6,6 +6,7 @@ import (
 	"net"
 	"os"
 	"regexp"
+	"strings"
 	"time"
 
 	"github.com/joho/godotenv"
@@ -25,8 +26,11 @@ type Upstream struct {
 
 // ServerConfig is the http listener configuration.
 type ServerConfig struct {
-	Host string `yaml:"host"`
-	Port string `yaml:"port"`
+	Host     string `yaml:"host"`
+	Port     string `yaml:"port"`
+	Env      string `yaml:"env"`
+	CertFile string `yaml:"cert_file"`
+	KeyFile  string `yaml:"key_file"`
 }
 
 // RedisConfig is the cache backend configuration.
@@ -141,6 +145,9 @@ func (c Config) withDefaults() Config {
 	if c.Server.Port == "" {
 		c.Server.Port = "8080"
 	}
+	if c.Server.Env == "" {
+		c.Server.Env = "local"
+	}
 	if c.Redis.Port == "" {
 		c.Redis.Port = "6379"
 	}
@@ -168,6 +175,16 @@ func LoadConfig() (*Config, error) {
 
 	c = c.withDefaults()
 	return &c, nil
+}
+
+// TLSEnabled reports whether the server should expose TLS. TLS is enabled for
+// any environment other than "local" or "test".
+func (c Config) TLSEnabled() bool {
+	env := strings.ToLower(strings.TrimSpace(c.Server.Env))
+	if env == "local" || env == "test" {
+		return false
+	}
+	return true
 }
 
 // envRef matches ${VAR} and ${VAR:-default}. Anything else, like a nested
