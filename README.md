@@ -340,6 +340,9 @@ is deliberately not used — it would read `${VAR:-default}` as a variable *name
 | --- | --- | --- | --- |
 | `server.host` | — | `127.0.0.1` | ⚠️ Parsed but **unused**: the listener always binds `:port`, i.e. every interface |
 | `server.port` | — | `8080` | |
+| `server.env` | `ENV` | `local` | Environment name. TLS is enabled if `ENV` is not `local` or `test`. |
+| `server.cert_file` | `TLS_CERT_FILE` | — | Path to TLS certificate (PEM) when TLS is enabled. |
+| `server.key_file` | `TLS_KEY_FILE` | — | Path to TLS private key (PEM) when TLS is enabled. |
 | `redis.host` | — | `redis` | The compose service name; use `localhost` when running outside compose |
 | `redis.port` | — | `6379` | |
 | `db.host` | `DB_HOST` | `localhost` | Compose overrides this with `db` |
@@ -538,7 +541,7 @@ small on purpose, and these are the boundaries of what it is.
 - **No retries, no circuit breaker, no hedging.** A failed upstream is a `502`.
 - **Responses are fully buffered**, so streaming responses and WebSockets are not
   supported.
-- **No TLS listener.** Terminate TLS in front of the gateway.
+- **TLS listener** — the gateway can serve HTTPS when `ENV` is not `local` or `test`. Configure `server.cert_file` and `server.key_file` in the config (or via `${TLS_CERT_FILE}`/`${TLS_KEY_FILE}`). When `ENV=local` or `ENV=test`, it serves plain HTTP (useful for local development and tests). Terminate TLS in front of the gateway if you prefer a reverse proxy to handle it.
 
 **Routing**
 

@@ -1,7 +1,6 @@
 package auth
 
 import (
-	"goteway/pkg/util"
 	"net/http"
 )
 
@@ -29,7 +28,6 @@ func RequireAuth(authenticator Authenticator, onError ErrorHandler) func(http.Ha
 			if err == nil {
 				var principal *Principal
 				principal, err = authenticator.Authenticate(bearer)
-				util.PrintVars(principal, err)
 				if err == nil {
 					next.ServeHTTP(w, r.WithContext(WithPrincipal(r.Context(), principal)))
 					return
