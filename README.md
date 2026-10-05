@@ -202,11 +202,43 @@ A successful `register`, `login` or `refresh` answers:
   "refresh_token": "eyJhbGciOiJIUzI1NiIs…",
   "token_type": "Bearer",
   "expires_at": "2026-01-01T12:15:00Z",
-  "user": { "id": 1, "email": "ada@example.com", "username": "ada", "role": "user", "is_active": true }
+  "user": { "id": "01HQZX8J7V9K4M3N2P1Q0RSTVW", "email": "ada@example.com", "username": "ada", "role": "user", "is_active": true }
 }
 ```
 
 `user` is present on `register` and `login`, and omitted on a bare `refresh`.
+
+**Identifiers.** Every id the gateway issues — accounts, stored sessions,
+registration token records, and the `jti` inside a token — is a **ULID**: 26
+characters of Crockford base32 carrying a millisecond timestamp followed by 80
+bits of entropy, e.g. `01HQZX8J7V9K4M3N2P1Q0RSTVW`.
+
+```go
+id := auth.ID("01HQZX8J7V9K4M3N2P1Q0RSTVW") // 26 chars, varchar(26)
+```
+
+They replaced auto-incrementing integers ([`pkg/auth/id.go`](pkg/auth/id.go)),
+which were a quiet liability: every `register` and `login` response handed out a
+number, so two accounts told you how many accounts existed, and the count kept
+growing. A ULID buys three things back:
+
+- **Not enumerable.** Nothing about an id reveals how many rows precede it.
+- **Sorts by creation time.** `varchar(26)` ordering is chronological, so
+  `ORDER BY id` is `ORDER BY age` and the `replaced_by_jti` chains in
+  `refresh_tokens` read in the order they happened.
+- **Minted by the domain, not the database.** `Service` assigns the id before it
+  stores anything, so there is no sequence left to leak — and a record that
+  reaches the store without one is refused rather than written under `''`.
+
+They are stored as their 26-character text rather than the library's 16 bytes,
+because that is the same form the API and the JWT `sub` claim carry, and because
+a GORM array is a different column type on every driver.
+
+What did **not** change: the *value* of a registration token is still 32 bytes
+of `crypto/rand`. It is a credential that authorises exactly one account
+creation, and a ULID is a clock plus monotonic entropy — a shape an attacker
+could walk forwards from the time alone. Only the record it names carries a
+ULID; the token handed to a human does not.
 
 **Token model.** Access tokens are HS256, signed with `auth.access_secret`,
 default 15 minutes, and are their own proof — verifying one hits no database, so
@@ -214,9 +246,10 @@ the proxy stays stateless. Refresh tokens are signed with a *different* secret
 (`auth.refresh_secret`, default 7 days); sharing one secret between the two kinds
 is rejected at startup. Issuer and audience are checked on every verification, the
 algorithm is pinned so a token signed with another one never reaches the key, and
-`auth.clock_skew` (5s) is the leeway allowed on time checks. Only the SHA-256 of
-a refresh token is persisted, so a database leak cannot be replayed against the
-gateway.
+`auth.clock_skew` (5s) is the leeway allowed on time checks. The `sub` claim is
+the account's ULID, and a subject that is not one is rejected as an invalid
+token rather than looked up. Only the SHA-256 of a refresh token is persisted, so
+a database leak cannot be replayed against the gateway.
 
 **Registration tokens.** Accounts are not self-service: an operator mints a
 one-time token, printed once and stored only as a hash.
@@ -507,7 +540,7 @@ make test              # go test -v ./...
 make test-coverage     # coverage profile + browser report
 ```
 
-177 tests, and the suite needs no running services: Redis is faked with
+196 tests, and the suite needs no running services: Redis is faked with
 [miniredis](https://github.com/alicebob/miniredis) and the GORM stores run
 against in-memory SQLite, so `make test` is hermetic. Current coverage:
 
@@ -516,8 +549,8 @@ against in-memory SQLite, so `make test` is hermetic. Current coverage:
 | `pkg/cache` | 100.0% |
 | `pkg/request` | 97.6% |
 | `pkg/repo` | 94.1% |
-| `pkg/auth` | 89.1% |
-| `app` | 73.4% |
+| `pkg/auth` | 89.2% |
+| `app` | 72.8% |
 
 CI ([`.github/workflows/go.yml`](.github/workflows/go.yml)) runs `make install`,
 `make build` and `make test` on every push and pull request to `main`, with the
@@ -588,6 +621,20 @@ small on purpose, and these are the boundaries of what it is.
 - **No dynamic configuration.** The config is embedded in the binary; changing it
   means a rebuild and a restart.
 - **Redis has no authentication and no database selection** — both are hardcoded.
+
+**Schema**
+
+- **The auth tables changed shape: identifiers are ULIDs, not integers.** A
+  database created by an earlier version must be dropped and recreated —
+  `AutoMigrate` adds missing columns but will not rewrite a `bigint` primary key
+  into a `varchar(26)` one, which on Postgres takes an explicit
+  `ALTER TABLE … ALTER COLUMN … TYPE … USING …` per table. There is no
+  backfill migration. `docker compose down -v` is enough; the config is the only
+  thing worth keeping.
+- **Every issued token stops working at the same time.** The `sub` claim is now a
+  ULID, so access and refresh tokens signed before the change fail verification as
+  invalid, and every stored registration token becomes unusable. Users register
+  again and `make genregtoken` mints new tokens.
 
 **Not built at all**
 

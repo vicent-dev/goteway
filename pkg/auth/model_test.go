@@ -1,12 +1,27 @@
 package auth
 
 import (
+	"encoding/json"
 	"testing"
 	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
+
+func TestUserSerializesItsIDAsAString(t *testing.T) {
+	// The identifier is part of every register, login and refresh response, so
+	// its wire form is an API contract: a quoted ULID, not a number.
+	payload, err := json.Marshal(&User{ID: testID(), Email: "ada@example.com", Role: RoleUser, IsActive: true})
+
+	require.NoError(t, err)
+	assert.Contains(t, string(payload), `"id":"`+testID().String()+`"`)
+	assert.NotContains(t, string(payload), `"id":1`)
+
+	var decoded User
+	require.NoError(t, json.Unmarshal(payload, &decoded))
+	assert.Equal(t, testID(), decoded.ID)
+}
 
 func TestUserVerifyPassword(t *testing.T) {
 	hash, err := HashPassword("correct horse", bcryptMinCost)

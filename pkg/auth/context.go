@@ -14,7 +14,9 @@ const bearerPrefix = "bearer"
 
 // Principal is the authenticated caller, as proven by an access token.
 type Principal struct {
-	UserID uint
+	// UserID is the account the token was issued to, as it was carried by the
+	// token: a ULID, or an error at parse time rather than a guess.
+	UserID ID
 	// TokenID identifies the access token that was presented.
 	TokenID string
 	// ExpiresAt is when the access token stops being accepted.

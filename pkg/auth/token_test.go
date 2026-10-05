@@ -22,7 +22,7 @@ func TestIssuerIssueReturnsUsablePair(t *testing.T) {
 	issuer := NewIssuer(testConfig())
 	now := time.Date(2026, time.March, 1, 12, 0, 0, 0, time.UTC)
 
-	session, stored, err := issuer.Issue(42, RequestMeta{UserAgent: "curl", IP: "127.0.0.1"}, now)
+	session, stored, err := issuer.Issue(testID(), RequestMeta{UserAgent: "curl", IP: "127.0.0.1"}, now)
 
 	require.NoError(t, err)
 	require.NotNil(t, stored)
@@ -34,7 +34,7 @@ func TestIssuerIssueReturnsUsablePair(t *testing.T) {
 
 	// The stored record is what a session needs to be rotated or revoked, and
 	// it never contains the raw token.
-	assert.Equal(t, uint(42), stored.UserID)
+	assert.Equal(t, testID(), stored.UserID)
 	assert.Equal(t, "curl", stored.UserAgent)
 	assert.Equal(t, "127.0.0.1", stored.IP)
 	assert.Equal(t, session.RefreshExpiresAt, stored.ExpiresAt)
@@ -46,7 +46,7 @@ func TestIssuerIssueReturnsUsablePair(t *testing.T) {
 func TestIssuerGivesEachTokenItsOwnID(t *testing.T) {
 	issuer := NewIssuer(testConfig())
 
-	session, stored, err := issuer.Issue(1, RequestMeta{}, time.Now())
+	session, stored, err := issuer.Issue(testID(), RequestMeta{}, time.Now())
 
 	require.NoError(t, err)
 	accessClaims, err := issuer.Parse(session.AccessToken, KindAccess)
@@ -62,19 +62,25 @@ func TestIssuerGivesEachTokenItsOwnID(t *testing.T) {
 func TestIssuerParseSubject(t *testing.T) {
 	issuer := NewIssuer(testConfig())
 
-	session, _, err := issuer.Issue(1234, RequestMeta{}, time.Now())
+	session, _, err := issuer.Issue(testID(), RequestMeta{}, time.Now())
 	require.NoError(t, err)
+
+	// The subject is the identifier as it is stored, so a claim read back is a
+	// key the database can be asked for without translating it first.
+	claims, err := issuer.Parse(session.AccessToken, KindAccess)
+	require.NoError(t, err)
+	assert.Equal(t, testID().String(), claims.Subject)
 
 	userID, err := issuer.ParseUserID(session.AccessToken, KindAccess)
 
 	require.NoError(t, err)
-	assert.Equal(t, uint(1234), userID)
+	assert.Equal(t, testID(), userID)
 }
 
 func TestIssuerRejectsWrongKind(t *testing.T) {
 	issuer := NewIssuer(testConfig())
 
-	session, _, err := issuer.Issue(1, RequestMeta{}, time.Now())
+	session, _, err := issuer.Issue(testID(), RequestMeta{}, time.Now())
 	require.NoError(t, err)
 
 	_, err = issuer.Parse(session.RefreshToken, KindAccess)
@@ -93,7 +99,7 @@ func TestIssuerRejectsForeignSecret(t *testing.T) {
 		Audience:      "goteway-test-clients",
 	})
 
-	session, _, err := issued.Issue(1, RequestMeta{}, time.Now())
+	session, _, err := issued.Issue(testID(), RequestMeta{}, time.Now())
 	require.NoError(t, err)
 
 	_, err = other.Parse(session.AccessToken, KindAccess)
@@ -115,7 +121,7 @@ func TestIssuerRejectsForeignIssuerAndAudience(t *testing.T) {
 		Audience:      "another-api",
 	})
 
-	session, _, err := issued.Issue(1, RequestMeta{}, time.Now())
+	session, _, err := issued.Issue(testID(), RequestMeta{}, time.Now())
 	require.NoError(t, err)
 
 	_, err = elsewhere.Parse(session.AccessToken, KindAccess)
@@ -128,7 +134,7 @@ func TestIssuerRejectsForeignIssuerAndAudience(t *testing.T) {
 func TestIssuerRejectsTamperedToken(t *testing.T) {
 	issuer := NewIssuer(testConfig())
 
-	session, _, err := issuer.Issue(1, RequestMeta{}, time.Now())
+	session, _, err := issuer.Issue(testID(), RequestMeta{}, time.Now())
 	require.NoError(t, err)
 
 	tampered := session.AccessToken[:len(session.AccessToken)-4] + "abcd"
@@ -189,7 +195,7 @@ func TestIssuerRejectsExpiredToken(t *testing.T) {
 	cfg.ClockSkew = 0
 	issuer := NewIssuer(cfg)
 
-	session, _, err := issuer.Issue(1, RequestMeta{}, time.Now().Add(-2*time.Minute))
+	session, _, err := issuer.Issue(testID(), RequestMeta{}, time.Now().Add(-2*time.Minute))
 	require.NoError(t, err)
 
 	_, err = issuer.Parse(session.AccessToken, KindAccess)
@@ -202,7 +208,7 @@ func TestIssuerAcceptsTokenWithinClockSkew(t *testing.T) {
 	cfg.ClockSkew = 30 * time.Second
 	issuer := NewIssuer(cfg)
 
-	session, _, err := issuer.Issue(1, RequestMeta{}, time.Now().Add(-45*time.Second))
+	session, _, err := issuer.Issue(testID(), RequestMeta{}, time.Now().Add(-45*time.Second))
 	require.NoError(t, err)
 
 	_, err = issuer.Parse(session.AccessToken, KindAccess)
@@ -211,6 +217,14 @@ func TestIssuerAcceptsTokenWithinClockSkew(t *testing.T) {
 
 func TestClaimsUserIDRejectsGarbageSubject(t *testing.T) {
 	_, err := (&Claims{RegisteredClaims: jwt.RegisteredClaims{Subject: "not-a-number"}}).UserID()
+
+	assert.ErrorIs(t, err, ErrInvalidToken)
+}
+
+func TestClaimsUserIDRejectsALegacyIntegerSubject(t *testing.T) {
+	// Tokens signed before ids were ULIDs carried a number here. They cannot be
+	// looked up any more, so they are refused instead of resolving to nothing.
+	_, err := (&Claims{RegisteredClaims: jwt.RegisteredClaims{Subject: "1"}}).UserID()
 
 	assert.ErrorIs(t, err, ErrInvalidToken)
 }

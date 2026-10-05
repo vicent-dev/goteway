@@ -2,7 +2,6 @@ package auth
 
 import (
 	"errors"
-	"strconv"
 	"time"
 
 	"github.com/golang-jwt/jwt/v5"
@@ -30,12 +29,12 @@ type Claims struct {
 }
 
 // UserID returns the subject of the claims as a user id.
-func (c *Claims) UserID() (uint, error) {
-	id, err := strconv.ParseUint(c.Subject, 10, 64)
-	if err != nil {
-		return 0, ErrInvalidToken
-	}
-	return uint(id), nil
+//
+// Anything that is not a well formed identifier is ErrInvalidToken, which
+// covers the subject a token signed before ids were ULIDs would carry: those
+// tokens are no longer representable and are refused rather than looked up.
+func (c *Claims) UserID() (ID, error) {
+	return parseID(c.Subject)
 }
 
 // IsExpired reports whether the token is past its expiry at now, allowing
@@ -87,7 +86,7 @@ func NewIssuer(cfg Config) *Issuer {
 // Issue mints a new access and refresh token pair for userID at now. The
 // returned RefreshToken is the session record to persist; it is not stored
 // here, so callers decide in which transaction it belongs.
-func (i *Issuer) Issue(userID uint, meta RequestMeta, now time.Time) (*Session, *RefreshToken, error) {
+func (i *Issuer) Issue(userID ID, meta RequestMeta, now time.Time) (*Session, *RefreshToken, error) {
 	accessExpiresAt := now.Add(i.cfg.AccessTTL)
 	accessToken, _, err := i.sign(userID, KindAccess, i.cfg.AccessSecret, accessExpiresAt, now)
 	if err != nil {
@@ -153,23 +152,23 @@ func (i *Issuer) Parse(raw string, kind TokenKind) (*Claims, error) {
 }
 
 // ParseUserID verifies a token of the given kind and returns its subject.
-func (i *Issuer) ParseUserID(raw string, kind TokenKind) (uint, error) {
+func (i *Issuer) ParseUserID(raw string, kind TokenKind) (ID, error) {
 	claims, err := i.Parse(raw, kind)
 	if err != nil {
-		return 0, err
+		return "", err
 	}
 	return claims.UserID()
 }
 
-func (i *Issuer) sign(userID uint, kind TokenKind, secret string, expiresAt, now time.Time) (raw, jti string, err error) {
-	jti, err = NewJTI()
+func (i *Issuer) sign(userID ID, kind TokenKind, secret string, expiresAt, now time.Time) (raw, jti string, err error) {
+	jti, err = newJTI(now)
 	if err != nil {
 		return "", "", err
 	}
 
 	claims := Claims{
 		RegisteredClaims: jwt.RegisteredClaims{
-			Subject:   strconv.FormatUint(uint64(userID), 10),
+			Subject:   userID.String(),
 			Issuer:    i.cfg.Issuer,
 			Audience:  jwt.ClaimStrings{i.cfg.Audience},
 			ExpiresAt: jwt.NewNumericDate(expiresAt),

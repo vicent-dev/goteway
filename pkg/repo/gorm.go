@@ -35,9 +35,14 @@ func (r *GormRepository[T]) Create(ctx context.Context, entity *T) error {
 }
 
 // GetByID returns the entity with the given primary key, or ErrNotFound.
-func (r *GormRepository[T]) GetByID(ctx context.Context, id uint) (*T, error) {
+//
+// The key is matched with an explicit Where rather than passed as an inline
+// condition: GORM reads a numeric string as "this is the primary key" and
+// anything else as raw SQL, so a textual key handed to First(dest, id) would
+// end up in the wrong branch.
+func (r *GormRepository[T]) GetByID(ctx context.Context, id string) (*T, error) {
 	var entity T
-	if err := r.db.WithContext(ctx).First(&entity, id).Error; err != nil {
+	if err := r.db.WithContext(ctx).Where("id = ?", id).First(&entity).Error; err != nil {
 		return nil, NormalizeError(err)
 	}
 	return &entity, nil
@@ -50,8 +55,8 @@ func (r *GormRepository[T]) Update(ctx context.Context, entity *T) error {
 
 // Delete removes the entity with the given primary key, honouring soft deletes
 // for models that declare gorm.DeletedAt.
-func (r *GormRepository[T]) Delete(ctx context.Context, id uint) error {
-	return r.db.WithContext(ctx).Delete(new(T), id).Error
+func (r *GormRepository[T]) Delete(ctx context.Context, id string) error {
+	return r.db.WithContext(ctx).Where("id = ?", id).Delete(new(T)).Error
 }
 
 // FindAll returns every entity.

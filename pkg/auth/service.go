@@ -73,6 +73,10 @@ type Service struct {
 	issuer *Issuer
 	// now is swapped in tests to drive expiry and rotation without sleeping.
 	now func() time.Time
+	// newID assigns the identifier of every record the service stores. It is
+	// an injectable port for the same reason now is: it reads the service
+	// clock, so a frozen clock freezes the id timestamps with it.
+	newID func() (ID, error)
 }
 
 // NewService returns a Service backed by store. A nil issuer is built from
@@ -81,12 +85,16 @@ func NewService(cfg Config, store Store, issuer *Issuer) *Service {
 	if issuer == nil {
 		issuer = NewIssuer(cfg)
 	}
-	return &Service{
+	svc := &Service{
 		cfg:    cfg.withDefaults(),
 		store:  store,
 		issuer: issuer,
 		now:    time.Now,
 	}
+	// Closed over svc rather than over now, so a test that replaces the clock
+	// also moves the ids it stamps.
+	svc.newID = func() (ID, error) { return newID(svc.now()) }
+	return svc
 }
 
 // Register consumes a registration token and creates the account it
@@ -146,7 +154,15 @@ func (s *Service) Register(ctx context.Context, in RegisterInput) (*Session, err
 			return err
 		}
 
+		// The identifier is minted here rather than by the database, which is
+		// what keeps it out of a sequence a client could count.
+		id, err := s.newID()
+		if err != nil {
+			return err
+		}
+
 		u := &User{
+			ID:           id,
 			Email:        email,
 			Username:     username,
 			PasswordHash: hash,
@@ -307,7 +323,7 @@ func (s *Service) Refresh(ctx context.Context, in RefreshInput) (*Session, error
 // revokeFamily drops every session a user still holds and reports reuse. It
 // runs outside any transaction, because the transaction that discovered the
 // reuse is rolled back.
-func (s *Service) revokeFamily(ctx context.Context, userID uint, now time.Time) error {
+func (s *Service) revokeFamily(ctx context.Context, userID ID, now time.Time) error {
 	if err := s.store.RevokeAllByUser(ctx, userID, now); err != nil {
 		return err
 	}
@@ -359,7 +375,13 @@ func (s *Service) IssueRegistrationToken(ctx context.Context, in IssueRegistrati
 		return "", err
 	}
 
+	id, err := s.newID()
+	if err != nil {
+		return "", err
+	}
+
 	token := &RegistrationToken{
+		ID:        id,
 		TokenHash: HashToken(raw),
 		IssuedBy:  in.IssuedBy,
 		ExpiresAt: s.now().Add(ttl),
@@ -401,11 +423,19 @@ func (s *Service) Authenticate(bearer string) (*Principal, error) {
 
 // issue mints a session and persists its refresh token through store, which
 // may be a transactional one.
-func (s *Service) issue(ctx context.Context, store Store, userID uint, meta RequestMeta, now time.Time) (*Session, *RefreshToken, error) {
+func (s *Service) issue(ctx context.Context, store Store, userID ID, meta RequestMeta, now time.Time) (*Session, *RefreshToken, error) {
 	session, refresh, err := s.issuer.Issue(userID, meta, now)
 	if err != nil {
 		return nil, nil, err
 	}
+	id, err := s.newID()
+	if err != nil {
+		return nil, nil, err
+	}
+	// The issuer fills in everything the token itself carries, including the
+	// jti the session is known by; the row it becomes gets its identity here,
+	// on the way into the store.
+	refresh.ID = id
 	if err := store.CreateRefreshToken(ctx, refresh); err != nil {
 		return nil, nil, err
 	}

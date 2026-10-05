@@ -42,6 +42,17 @@ func issueRegistrationToken(t *testing.T, svc *Service) string {
 	return raw
 }
 
+// storedRegistrationToken returns the record behind a raw registration token,
+// which is how a test names the token it minted now that ids are not sequential.
+func storedRegistrationToken(t *testing.T, store *fakeStore, raw string) *RegistrationToken {
+	t.Helper()
+
+	stored := store.registrationToken(HashToken(raw))
+	require.NotNil(t, stored, "the registration token should have been stored")
+
+	return stored
+}
+
 func registerUser(t *testing.T, svc *Service, email, password string) *Session {
 	t.Helper()
 
@@ -85,8 +96,7 @@ func TestRegisterCreatesTheAccountAndASession(t *testing.T) {
 	assert.Equal(t, session.User.ID, principal.UserID)
 
 	// The one time token is burnt and points at the account it created.
-	stored := store.registrationToken(1)
-	require.NotNil(t, stored)
+	stored := storedRegistrationToken(t, store, regToken)
 	require.NotNil(t, stored.UsedAt)
 	assert.Equal(t, testNow, *stored.UsedAt)
 	require.NotNil(t, stored.UsedByUserID)
@@ -100,6 +110,56 @@ func TestRegisterCreatesTheAccountAndASession(t *testing.T) {
 	assert.Equal(t, "curl", persisted.UserAgent)
 	assert.Equal(t, "10.0.0.1", persisted.IP)
 	assert.Equal(t, HashToken(session.RefreshToken), persisted.TokenHash)
+}
+
+func TestRegisterAssignsULIDIdentifiers(t *testing.T) {
+	svc, store := newTestService(t)
+
+	first := registerUser(t, svc, "ada@example.com", "supersecret")
+	second := registerUser(t, svc, "grace@example.com", "supersecret")
+
+	// Ids are minted by the domain, so they are not a count of the rows before
+	// them: two accounts on a frozen clock do not end up 1 and 2.
+	for _, id := range []ID{first.User.ID, second.User.ID} {
+		parsed, err := parseID(id.String())
+		require.NoError(t, err, "a stored account id should be a ULID")
+		assert.Equal(t, id, parsed)
+		assert.Len(t, id, 26)
+	}
+	assert.NotEqual(t, first.User.ID, second.User.ID)
+	assert.Less(t, first.User.ID.String(), second.User.ID.String(),
+		"ids issued in order sort by creation time")
+
+	// The session records the account by that id, and every stored row carries
+	// one of its own.
+	claims, err := svc.issuer.Parse(second.RefreshToken, KindRefresh)
+	require.NoError(t, err)
+	persisted := store.storedRefreshToken(claims.ID)
+	require.NotNil(t, persisted)
+	assert.Equal(t, second.User.ID, persisted.UserID)
+	assert.NotEmpty(t, persisted.ID)
+
+	regToken := issueRegistrationToken(t, svc)
+	stored := storedRegistrationToken(t, store, regToken)
+	_, err = parseID(stored.ID.String())
+	assert.NoError(t, err, "a registration token record carries a ULID id too")
+}
+
+func TestRegisterReportsAFailureToMintAnID(t *testing.T) {
+	svc, store := newTestService(t)
+	regToken := issueRegistrationToken(t, svc)
+	boom := errors.New("entropy exhausted")
+	svc.newID = func() (ID, error) { return "", boom }
+
+	_, err := svc.Register(context.Background(), RegisterInput{
+		Email:             "ada@example.com",
+		Password:          "supersecret",
+		RegistrationToken: regToken,
+	})
+
+	assert.ErrorIs(t, err, boom)
+	assert.Empty(t, store.users, "an account without an id is never stored")
+	assert.Nil(t, storedRegistrationToken(t, store, regToken).UsedAt, "nor is the token burnt")
 }
 
 func TestRegisterRejectsAnAlreadyUsedRegistrationToken(t *testing.T) {
@@ -199,16 +259,17 @@ func TestRegisterValidatesItsInput(t *testing.T) {
 func TestRegisterRollsBackWhenTheSessionCannotBeStored(t *testing.T) {
 	svc, store := newTestService(t)
 	store.failCreateRefresh = errors.New("redis is on fire")
+	regToken := issueRegistrationToken(t, svc)
 
 	_, err := svc.Register(context.Background(), RegisterInput{
 		Email:             "ada@example.com",
 		Password:          "supersecret",
-		RegistrationToken: issueRegistrationToken(t, svc),
+		RegistrationToken: regToken,
 	})
 
 	assert.EqualError(t, err, "redis is on fire")
 	assert.Empty(t, store.users, "the account is rolled back with the session")
-	assert.Nil(t, store.registrationToken(1).UsedAt, "the registration token is not burnt")
+	assert.Nil(t, storedRegistrationToken(t, store, regToken).UsedAt, "the registration token is not burnt")
 	assert.False(t, store.committed)
 }
 
@@ -225,7 +286,7 @@ func TestRegisterDoesNotBurnTheTokenWhenTheAccountExists(t *testing.T) {
 	})
 
 	assert.ErrorIs(t, err, ErrEmailTaken)
-	assert.Nil(t, store.registrationToken(2).UsedAt)
+	assert.Nil(t, storedRegistrationToken(t, store, regToken).UsedAt)
 }
 
 func TestLoginStartsASession(t *testing.T) {
@@ -411,7 +472,7 @@ func TestRefreshRejectsAnUnknownToken(t *testing.T) {
 	svc, _ := newTestService(t)
 	registerUser(t, svc, "ada@example.com", "supersecret")
 
-	session, _, err := svc.issuer.Issue(1, RequestMeta{}, testNow)
+	session, _, err := svc.issuer.Issue(testID(), RequestMeta{}, testNow)
 	require.NoError(t, err)
 
 	// Signed by this issuer, but no session was ever stored for it.
@@ -485,23 +546,27 @@ func TestIssueRegistrationTokenStoresOnlyTheHash(t *testing.T) {
 
 	require.NoError(t, err)
 	assert.Len(t, raw, tokenBytes*2)
+	// The value is a credential, so it stays random rather than becoming a
+	// ULID the way every identifier here did.
+	_, err = parseID(raw)
+	assert.Error(t, err, "a registration token must not be guessable")
 
-	stored := store.registrationToken(1)
-	require.NotNil(t, stored)
+	stored := storedRegistrationToken(t, store, raw)
 	assert.Equal(t, HashToken(raw), stored.TokenHash)
 	assert.NotEqual(t, raw, stored.TokenHash)
 	assert.Equal(t, "admin@example.com", stored.IssuedBy)
 	assert.Equal(t, testNow.Add(time.Hour), stored.ExpiresAt)
 	assert.False(t, stored.IsUsed())
+	assert.NotEmpty(t, stored.ID)
 }
 
 func TestIssueRegistrationTokenDefaultsTheTTL(t *testing.T) {
 	svc, store := newTestService(t)
 
-	_, err := svc.IssueRegistrationToken(context.Background(), IssueRegistrationTokenInput{IssuedBy: "admin"})
-
+	raw, err := svc.IssueRegistrationToken(context.Background(), IssueRegistrationTokenInput{IssuedBy: "admin"})
 	require.NoError(t, err)
-	assert.Equal(t, testNow.Add(svc.cfg.RegistrationTokenTTL), store.registrationToken(1).ExpiresAt)
+
+	assert.Equal(t, testNow.Add(svc.cfg.RegistrationTokenTTL), storedRegistrationToken(t, store, raw).ExpiresAt)
 }
 
 func TestAuthenticate(t *testing.T) {
@@ -583,7 +648,7 @@ func TestServicePropagatesStoreFailures(t *testing.T) {
 		})
 
 		assert.ErrorIs(t, err, boom)
-		assert.Nil(t, store.registrationToken(1).UsedAt, "the token survives a failed registration")
+		assert.Nil(t, storedRegistrationToken(t, store, regToken).UsedAt, "the token survives a failed registration")
 	})
 
 	t.Run("consume", func(t *testing.T) {

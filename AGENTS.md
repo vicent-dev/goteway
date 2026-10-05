@@ -96,7 +96,7 @@ The pattern `pkg/auth` established, which the rest of the codebase follows:
   a cache miss is `cache.ErrNotFound`, and `Client.Request` treats it and a cache outage alike as
   "go upstream", logging the difference.
 - Inject whatever a test needs to control: `auth.Authenticator`, `auth.Store`, `Service.now`,
-  `request.Client.httpClient`.
+  `Service.newID`, `request.Client.httpClient`.
 
 ## Conventions
 
@@ -111,6 +111,17 @@ The pattern `pkg/auth` established, which the rest of the codebase follows:
 - Cache implementations satisfy `cache.Cache[T]` and operate on a `cache.Cacheable` value — the key
   and serialized value are produced by that value, not by the cache. Every method returns an error,
   so an outage is never silently read as a miss.
+- **Identifiers are ULIDs, minted by the domain.** `pkg/auth.ID` is a 26-character Crockford base32
+  string; every account, session and registration token record carries one, as does the `jti` inside
+  a token. `Service.newID` assigns them from the service clock before anything is stored, so no
+  sequence exists in the database and `Service.now` moves the id timestamps too. Consequently the
+  generic `repo.Repository[T]` takes the primary key as a `string`: a `uint` there would tie a
+  generic port to the first domain that used it. Two things must not drift: a record that reaches
+  `GormStore` without an id is refused (`requireID`) rather than written under `''`, and a token
+  `sub` claim that is not a ULID is `auth.ErrInvalidToken`, not a lookup that silently misses.
+- An id that is a **credential** is not a ULID. `auth.NewOpaqueToken` stays 32 bytes of
+  `crypto/rand`, because a ULID is a clock plus monotonic entropy and a registration token
+  authorises exactly one account creation.
 - A value shared with another goroutine and read by the handler must be snapshotted first, not shared
   as a reader. `Call.body` is the example: one read of the upstream body feeds both the cache value
   and the response the client is served.
@@ -150,6 +161,16 @@ Deliberately not fixed yet, because fixing them means changing behaviour or addi
 
 Already fixed (kept here so the reasoning is not lost):
 
+- Account, session and registration token ids were `uint` auto-increment columns, and every
+  `register`/`login` response handed one to the client. Two registrations therefore disclosed the
+  size of the user table, and the number kept counting. They are ULIDs now (`pkg/auth/id.go`),
+  assigned by `Service.newID` before the store is called, so the enumeration is gone, `varchar(26)`
+  ordering is chronological, and no sequence exists to leak. `repo.GetByID`/`Delete` moved to an
+  explicit `Where("id = ?", …)` rather than `First(dest, id)`, which GORM reads as a primary key
+  when it is numeric and as raw SQL when it is not. `NewJTI` is gone: the jti of a refresh token is
+  a ULID too, so `replaced_by_jti` chains read in order. Not converted retroactively — `AutoMigrate`
+  will not rewrite a `bigint` primary key, and every pre-existing token carries a numeric `sub` that
+  is now `ErrInvalidToken`, so the database is recreated instead.
 - Every proxied response reached the client as `200 OK`: `defaultRouteHandler` copied the upstream
   headers and body but never called `w.WriteHeader`. It does now, on both the live and the cached
   path — a cache hit restores the status it stored, so the two are identical. `Call.SetValue`

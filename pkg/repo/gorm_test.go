@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"sync/atomic"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -13,10 +14,26 @@ import (
 	"gorm.io/gorm/logger"
 )
 
+// widget identifies itself with a textual key, the way every entity the auth
+// domain stores does. The repository is generic, so it cannot assume the primary
+// key is a number.
 type widget struct {
-	ID    uint   `gorm:"primarykey"`
+	ID    string `gorm:"type:varchar(26);primaryKey"`
 	Name  string `gorm:"uniqueIndex;not null"`
 	Stock int
+}
+
+// newWidget returns a widget with a distinct, caller assigned key, which is
+// what a ULID primary key obliges the caller to do. The counter stands in for
+// the ULID the real entities get, and only has to be unique within a run.
+var widgetSeq atomic.Uint64
+
+func newWidget(t *testing.T, name string) *widget {
+	t.Helper()
+
+	n := widgetSeq.Add(1)
+
+	return &widget{ID: fmt.Sprintf("01HQZX00000000000000%010d", n), Name: name}
 }
 
 func newTestRepo(t *testing.T) *GormRepository[widget] {
@@ -32,13 +49,14 @@ func newTestRepo(t *testing.T) *GormRepository[widget] {
 	return NewGormRepository[widget](db)
 }
 
-func TestGormRepositoryCreateFillsID(t *testing.T) {
+func TestGormRepositoryStoresTheKeyItIsGiven(t *testing.T) {
 	r := newTestRepo(t)
 
-	w := &widget{Name: "bolt", Stock: 3}
+	w := newWidget(t, "bolt")
+	w.Stock = 3
 	require.NoError(t, r.Create(context.Background(), w))
 
-	assert.NotZero(t, w.ID)
+	assert.NotEmpty(t, w.ID)
 
 	stored, err := r.GetByID(context.Background(), w.ID)
 	require.NoError(t, err)
@@ -49,7 +67,7 @@ func TestGormRepositoryCreateFillsID(t *testing.T) {
 func TestGormRepositoryGetByIDNotFound(t *testing.T) {
 	r := newTestRepo(t)
 
-	_, err := r.GetByID(context.Background(), 404)
+	_, err := r.GetByID(context.Background(), "01HQZX0000000000000000000A")
 
 	assert.ErrorIs(t, err, ErrNotFound)
 }
@@ -57,7 +75,8 @@ func TestGormRepositoryGetByIDNotFound(t *testing.T) {
 func TestGormRepositoryUpdate(t *testing.T) {
 	r := newTestRepo(t)
 
-	w := &widget{Name: "nut", Stock: 1}
+	w := newWidget(t, "nut")
+	w.Stock = 1
 	require.NoError(t, r.Create(context.Background(), w))
 
 	w.Stock = 9
@@ -71,7 +90,7 @@ func TestGormRepositoryUpdate(t *testing.T) {
 func TestGormRepositoryDelete(t *testing.T) {
 	r := newTestRepo(t)
 
-	w := &widget{Name: "screw"}
+	w := newWidget(t, "screw")
 	require.NoError(t, r.Create(context.Background(), w))
 	require.NoError(t, r.Delete(context.Background(), w.ID))
 
@@ -83,8 +102,8 @@ func TestGormRepositoryDelete(t *testing.T) {
 func TestGormRepositoryFindAll(t *testing.T) {
 	r := newTestRepo(t)
 
-	require.NoError(t, r.Create(context.Background(), &widget{Name: "a"}))
-	require.NoError(t, r.Create(context.Background(), &widget{Name: "b"}))
+	require.NoError(t, r.Create(context.Background(), newWidget(t, "a")))
+	require.NoError(t, r.Create(context.Background(), newWidget(t, "b")))
 
 	all, err := r.FindAll(context.Background())
 
@@ -104,11 +123,11 @@ func TestGormRepositoryFindAllEmptyIsNotNil(t *testing.T) {
 
 func TestGormRepositoryWithTxRollsBack(t *testing.T) {
 	r := newTestRepo(t)
-	require.NoError(t, r.Create(context.Background(), &widget{Name: "outside"}))
+	require.NoError(t, r.Create(context.Background(), newWidget(t, "outside")))
 
 	tx := r.DB().Begin()
 	txRepo := r.WithTx(tx)
-	require.NoError(t, txRepo.Create(context.Background(), &widget{Name: "inside"}))
+	require.NoError(t, txRepo.Create(context.Background(), newWidget(t, "inside")))
 	require.NoError(t, tx.Rollback().Error)
 
 	all, err := r.FindAll(context.Background())

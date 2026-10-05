@@ -60,7 +60,7 @@ func TestBearerTokenReadsTheAuthorizationHeader(t *testing.T) {
 }
 
 func TestPrincipalRoundTrip(t *testing.T) {
-	want := &Principal{UserID: 42, TokenID: "jti", ExpiresAt: time.Now().Add(time.Minute)}
+	want := &Principal{UserID: testID(), TokenID: "jti", ExpiresAt: time.Now().Add(time.Minute)}
 
 	got, ok := PrincipalFromContext(WithPrincipal(t.Context(), want))
 
@@ -85,21 +85,22 @@ func TestPrincipalFromContextIgnoresNilPrincipal(t *testing.T) {
 
 func TestPrincipalFromRequest(t *testing.T) {
 	request := httptest.NewRequest(http.MethodGet, "/internal/resource", nil)
-	request = request.WithContext(WithPrincipal(request.Context(), &Principal{UserID: 7}))
+	request = request.WithContext(WithPrincipal(request.Context(), &Principal{UserID: testID()}))
 
 	principal, ok := PrincipalFromRequest(request)
 
 	assert.True(t, ok)
-	assert.Equal(t, uint(7), principal.UserID)
+	assert.Equal(t, testID(), principal.UserID)
 }
 
 func TestPrincipalContextKeyIsNotForgeableOutsideThePackage(t *testing.T) {
 	// The key type is unexported, so a plain string key cannot collide with it.
-	ctx := WithPrincipal(t.Context(), &Principal{UserID: 1})
-	ctx = context.WithValue(ctx, "principal", &Principal{UserID: 99}) //nolint:staticcheck // deliberate
+	ctx := WithPrincipal(t.Context(), &Principal{UserID: testID()})
+	forged := ID("01HQZX0000000000000000000B")
+	ctx = context.WithValue(ctx, "principal", &Principal{UserID: forged}) //nolint:staticcheck // deliberate
 
 	principal, ok := PrincipalFromContext(ctx)
 
 	assert.True(t, ok)
-	assert.Equal(t, uint(1), principal.UserID)
+	assert.Equal(t, testID(), principal.UserID)
 }

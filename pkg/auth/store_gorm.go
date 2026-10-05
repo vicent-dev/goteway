@@ -2,6 +2,7 @@ package auth
 
 import (
 	"context"
+	"errors"
 	"time"
 
 	"gorm.io/gorm"
@@ -47,6 +48,9 @@ func (s *GormStore) WithinTx(ctx context.Context, fn func(Store) error) error {
 }
 
 func (s *GormStore) CreateUser(ctx context.Context, u *User) error {
+	if err := requireID(u.ID); err != nil {
+		return err
+	}
 	return s.users.Create(ctx, u)
 }
 
@@ -58,11 +62,14 @@ func (s *GormStore) ByEmail(ctx context.Context, email string) (*User, error) {
 	return &u, nil
 }
 
-func (s *GormStore) ByID(ctx context.Context, id uint) (*User, error) {
-	return s.users.GetByID(ctx, id)
+func (s *GormStore) ByID(ctx context.Context, id ID) (*User, error) {
+	return s.users.GetByID(ctx, id.String())
 }
 
 func (s *GormStore) CreateRefreshToken(ctx context.Context, rt *RefreshToken) error {
+	if err := requireID(rt.ID); err != nil {
+		return err
+	}
 	return s.refreshToken.Create(ctx, rt)
 }
 
@@ -80,7 +87,7 @@ func (s *GormStore) UpdateRefreshToken(ctx context.Context, rt *RefreshToken) er
 	return s.refreshToken.Update(ctx, rt)
 }
 
-func (s *GormStore) RevokeAllByUser(ctx context.Context, userID uint, at time.Time) error {
+func (s *GormStore) RevokeAllByUser(ctx context.Context, userID ID, at time.Time) error {
 	return s.refreshToken.DB().WithContext(ctx).
 		Model(&RefreshToken{}).
 		Where("user_id = ? AND revoked_at IS NULL", userID).
@@ -88,6 +95,9 @@ func (s *GormStore) RevokeAllByUser(ctx context.Context, userID uint, at time.Ti
 }
 
 func (s *GormStore) CreateRegistrationToken(ctx context.Context, t *RegistrationToken) error {
+	if err := requireID(t.ID); err != nil {
+		return err
+	}
 	return s.regToken.Create(ctx, t)
 }
 
@@ -104,7 +114,7 @@ func (s *GormStore) ByTokenHash(ctx context.Context, hash string) (*Registration
 // ConsumeRegistrationToken marks a registration token as used in a single
 // conditional statement, so the winner of a race is the only caller that gets
 // true.
-func (s *GormStore) ConsumeRegistrationToken(ctx context.Context, id uint, usedBy uint, at time.Time) (bool, error) {
+func (s *GormStore) ConsumeRegistrationToken(ctx context.Context, id ID, usedBy ID, at time.Time) (bool, error) {
 	result := s.regToken.DB().WithContext(ctx).
 		Model(&RegistrationToken{}).
 		Where("id = ? AND used_at IS NULL", id).
@@ -113,4 +123,21 @@ func (s *GormStore) ConsumeRegistrationToken(ctx context.Context, id uint, usedB
 		return false, result.Error
 	}
 	return result.RowsAffected == 1, nil
+}
+
+// errMissingID is internal to the store: the service is what assigns
+// identifiers, so a record arriving without one is a bug rather than an outcome
+// a caller could be expected to handle. It is a sentinel so the guard below can
+// be asserted on directly.
+var errMissingID = errors.New("auth: stored a record without an id")
+
+// requireID refuses a record that reached the store without the identifier the
+// service was supposed to assign. There is no sequence left to fall back on, so
+// the insert would otherwise store it under the empty string and fail on the
+// second one — a silent collision instead of an error.
+func requireID(id ID) error {
+	if id == "" {
+		return errMissingID
+	}
+	return nil
 }

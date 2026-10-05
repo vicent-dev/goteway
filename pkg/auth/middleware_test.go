@@ -56,7 +56,7 @@ func requireRequest(t *testing.T, r *http.Request) {
 }
 
 func TestRequireAuthAllowsValidToken(t *testing.T) {
-	authenticator := &stubAuthenticator{principal: &Principal{UserID: 42}}
+	authenticator := &stubAuthenticator{principal: &Principal{UserID: testID()}}
 
 	recorder, captured := serveWithRequireAuth(t, authenticator, "Bearer good-token")
 
@@ -66,11 +66,11 @@ func TestRequireAuthAllowsValidToken(t *testing.T) {
 
 	principal, ok := PrincipalFromContext(captured.Context())
 	assert.True(t, ok)
-	assert.Equal(t, uint(42), principal.UserID)
+	assert.Equal(t, testID(), principal.UserID)
 }
 
 func TestRequireAuthRejectsMissingHeader(t *testing.T) {
-	authenticator := &stubAuthenticator{principal: &Principal{UserID: 42}}
+	authenticator := &stubAuthenticator{principal: &Principal{UserID: testID()}}
 
 	recorder, captured := serveWithRequireAuth(t, authenticator, "")
 
@@ -82,7 +82,7 @@ func TestRequireAuthRejectsMissingHeader(t *testing.T) {
 }
 
 func TestRequireAuthRejectsMalformedHeader(t *testing.T) {
-	authenticator := &stubAuthenticator{principal: &Principal{UserID: 42}}
+	authenticator := &stubAuthenticator{principal: &Principal{UserID: testID()}}
 
 	recorder, captured := serveWithRequireAuth(t, authenticator, "Basic dXNlcjpwYXNz")
 

@@ -18,8 +18,12 @@ const (
 )
 
 // User is an account that can authenticate against the gateway.
+//
+// The identifiers below are ULIDs assigned by the service before it stores
+// anything (see id.go), so the primary keys carry no auto increment and no
+// sequence has to exist to be leaked.
 type User struct {
-	ID           uint           `gorm:"primarykey" json:"id"`
+	ID           ID             `gorm:"type:varchar(26);primaryKey" json:"id"`
 	Email        string         `gorm:"type:varchar(255);uniqueIndex;not null" json:"email"`
 	Username     string         `gorm:"type:varchar(100);uniqueIndex" json:"username,omitempty"`
 	PasswordHash string         `gorm:"type:varchar(255);not null" json:"-"`
@@ -44,9 +48,9 @@ func (u *User) CanAuthenticate() bool {
 // stored, only its identifier and its hash, so a database leak cannot be
 // replayed against the gateway.
 type RefreshToken struct {
-	ID            uint       `gorm:"primarykey"`
+	ID            ID         `gorm:"type:varchar(26);primaryKey"`
 	JTI           string     `gorm:"type:varchar(64);uniqueIndex;not null"`
-	UserID        uint       `gorm:"index;not null"`
+	UserID        ID         `gorm:"type:varchar(26);index;not null"`
 	TokenHash     string     `gorm:"type:varchar(255);index;not null"`
 	ExpiresAt     time.Time  `gorm:"index;not null"`
 	RevokedAt     *time.Time `gorm:"index"`
@@ -76,12 +80,12 @@ func (t *RefreshToken) Revoke(now time.Time, replacedBy string) {
 
 // RegistrationToken authorises exactly one account creation.
 type RegistrationToken struct {
-	ID           uint       `gorm:"primarykey"`
+	ID           ID         `gorm:"type:varchar(26);primaryKey"`
 	TokenHash    string     `gorm:"type:varchar(255);uniqueIndex;not null"`
 	IssuedBy     string     `gorm:"type:varchar(100)"`
 	ExpiresAt    time.Time  `gorm:"not null"`
 	UsedAt       *time.Time `gorm:"index"`
-	UsedByUserID *uint      `gorm:"index"`
+	UsedByUserID *ID        `gorm:"type:varchar(26);index"`
 	CreatedAt    time.Time
 	UpdatedAt    time.Time
 	DeletedAt    gorm.DeletedAt `gorm:"index"`

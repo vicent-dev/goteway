@@ -17,7 +17,7 @@ import (
 type UserStore interface {
 	CreateUser(ctx context.Context, u *User) error
 	ByEmail(ctx context.Context, email string) (*User, error)
-	ByID(ctx context.Context, id uint) (*User, error)
+	ByID(ctx context.Context, id ID) (*User, error)
 }
 
 // RefreshTokenStore persists issued sessions.
@@ -27,7 +27,7 @@ type RefreshTokenStore interface {
 	UpdateRefreshToken(ctx context.Context, rt *RefreshToken) error
 	// RevokeAllByUser revokes every session of a user at once, which is how
 	// token reuse is answered and how an account can be logged out everywhere.
-	RevokeAllByUser(ctx context.Context, userID uint, at time.Time) error
+	RevokeAllByUser(ctx context.Context, userID ID, at time.Time) error
 }
 
 // RegistrationTokenStore persists one time registration tokens.
@@ -37,11 +37,15 @@ type RegistrationTokenStore interface {
 	// ConsumeRegistrationToken atomically marks a token as used by usedBy. It
 	// reports whether this call is the one that consumed it, so two
 	// registrations racing for the same token cannot both succeed.
-	ConsumeRegistrationToken(ctx context.Context, id uint, usedBy uint, at time.Time) (bool, error)
+	ConsumeRegistrationToken(ctx context.Context, id ID, usedBy ID, at time.Time) (bool, error)
 }
 
 // Store is every port the auth service needs, plus the transaction boundary
 // that lets a registration be all or nothing.
+//
+// The Create methods take a record that already carries the identifier the
+// service assigned: no adapter is allowed to invent one, because an adapter that
+// generated ids would hand the domain ids it cannot predict or test.
 type Store interface {
 	UserStore
 	RefreshTokenStore
