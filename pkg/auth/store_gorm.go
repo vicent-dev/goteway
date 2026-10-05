@@ -20,7 +20,6 @@ type GormStore struct {
 	regToken     *repo.GormRepository[RegistrationToken]
 }
 
-// NewGormStore returns a Store backed by db.
 func NewGormStore(db *gorm.DB) *GormStore {
 	return &GormStore{
 		db:           db,
@@ -30,17 +29,14 @@ func NewGormStore(db *gorm.DB) *GormStore {
 	}
 }
 
-// Models returns every entity owned by this package.
 func Models() []any {
 	return []any{&User{}, &RefreshToken{}, &RegistrationToken{}}
 }
 
-// Migrate creates or updates the tables backing the auth domain.
 func Migrate(db *gorm.DB) error {
 	return db.AutoMigrate(Models()...)
 }
 
-// WithinTx runs fn in a transaction, giving it a Store bound to it.
 func (s *GormStore) WithinTx(ctx context.Context, fn func(Store) error) error {
 	return s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		return fn(NewGormStore(tx))
@@ -73,7 +69,6 @@ func (s *GormStore) CreateRefreshToken(ctx context.Context, rt *RefreshToken) er
 	return s.refreshToken.Create(ctx, rt)
 }
 
-// ByJTI returns the stored session identified by jti.
 func (s *GormStore) ByJTI(ctx context.Context, jti string) (*RefreshToken, error) {
 	var rt RefreshToken
 	if err := s.refreshToken.DB().WithContext(ctx).Where("jti = ?", jti).First(&rt).Error; err != nil {
@@ -82,7 +77,6 @@ func (s *GormStore) ByJTI(ctx context.Context, jti string) (*RefreshToken, error
 	return &rt, nil
 }
 
-// UpdateRefreshToken persists a session, typically to record a rotation.
 func (s *GormStore) UpdateRefreshToken(ctx context.Context, rt *RefreshToken) error {
 	return s.refreshToken.Update(ctx, rt)
 }
@@ -101,8 +95,6 @@ func (s *GormStore) CreateRegistrationToken(ctx context.Context, t *Registration
 	return s.regToken.Create(ctx, t)
 }
 
-// ByTokenHash looks a registration token up by the hash of its raw value, the
-// raw value itself never being stored.
 func (s *GormStore) ByTokenHash(ctx context.Context, hash string) (*RegistrationToken, error) {
 	var t RegistrationToken
 	if err := s.regToken.DB().WithContext(ctx).Where("token_hash = ?", hash).First(&t).Error; err != nil {
@@ -111,9 +103,6 @@ func (s *GormStore) ByTokenHash(ctx context.Context, hash string) (*Registration
 	return &t, nil
 }
 
-// ConsumeRegistrationToken marks a registration token as used in a single
-// conditional statement, so the winner of a race is the only caller that gets
-// true.
 func (s *GormStore) ConsumeRegistrationToken(ctx context.Context, id ID, usedBy ID, at time.Time) (bool, error) {
 	result := s.regToken.DB().WithContext(ctx).
 		Model(&RegistrationToken{}).
@@ -125,16 +114,8 @@ func (s *GormStore) ConsumeRegistrationToken(ctx context.Context, id ID, usedBy 
 	return result.RowsAffected == 1, nil
 }
 
-// errMissingID is internal to the store: the service is what assigns
-// identifiers, so a record arriving without one is a bug rather than an outcome
-// a caller could be expected to handle. It is a sentinel so the guard below can
-// be asserted on directly.
 var errMissingID = errors.New("auth: stored a record without an id")
 
-// requireID refuses a record that reached the store without the identifier the
-// service was supposed to assign. There is no sequence left to fall back on, so
-// the insert would otherwise store it under the empty string and fail on the
-// second one — a silent collision instead of an error.
 func requireID(id ID) error {
 	if id == "" {
 		return errMissingID

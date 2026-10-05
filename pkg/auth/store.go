@@ -5,14 +5,6 @@ import (
 	"time"
 )
 
-// The store ports below are the only persistence the auth domain depends on.
-// Lookups report repo.ErrNotFound when nothing matches, never a driver error,
-// which is what lets the domain be tested against in memory fakes.
-//
-// Ports are deliberately narrow instead of wrapping repo.Repository: the auth
-// use cases only need these operations, and a narrow port keeps the domain
-// from depending on a CRUD API it does not use.
-
 // UserStore persists accounts.
 type UserStore interface {
 	CreateUser(ctx context.Context, u *User) error
@@ -42,10 +34,6 @@ type RegistrationTokenStore interface {
 
 // Store is every port the auth service needs, plus the transaction boundary
 // that lets a registration be all or nothing.
-//
-// The Create methods take a record that already carries the identifier the
-// service assigned: no adapter is allowed to invent one, because an adapter that
-// generated ids would hand the domain ids it cannot predict or test.
 type Store interface {
 	UserStore
 	RefreshTokenStore

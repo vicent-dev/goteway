@@ -7,8 +7,6 @@ import (
 	"github.com/golang-jwt/jwt/v5"
 )
 
-// TokenKind tells an access token from a refresh token. Each kind is signed
-// with its own secret and rejected when the other kind is asked for.
 type TokenKind string
 
 const (
@@ -28,22 +26,10 @@ type Claims struct {
 	Kind TokenKind `json:"typ"`
 }
 
-// UserID returns the subject of the claims as a user id.
-//
-// Anything that is not a well formed identifier is ErrInvalidToken, which
-// covers the subject a token signed before ids were ULIDs would carry: those
-// tokens are no longer representable and are refused rather than looked up.
 func (c *Claims) UserID() (ID, error) {
 	return parseID(c.Subject)
 }
 
-// IsExpired reports whether the token is past its expiry at now, allowing
-// leeway for clock skew exactly as the parser does: a token stays valid until
-// its expiry plus leeway has passed.
-//
-// A token carrying no expiry claim counts as expired. Every token this package
-// issues has one, so this only rejects a signature that cannot be shown to
-// still be live, instead of accepting it forever.
 func (c *Claims) IsExpired(now time.Time, leeway time.Duration) bool {
 	if c.ExpiresAt == nil {
 		return true
@@ -57,16 +43,14 @@ type RequestMeta struct {
 	IP        string
 }
 
-// Session is the credential pair handed to a client, plus what the gateway
-// needs to reason about it later.
 type Session struct {
 	AccessToken  string
 	RefreshToken string
 	Scheme       string
-	// AccessExpiresAt and RefreshExpiresAt are wall clock hints for clients.
+
 	AccessExpiresAt  time.Time
 	RefreshExpiresAt time.Time
-	// User is set when the session was started for a known account.
+
 	User *User
 }
 
@@ -77,15 +61,10 @@ type Issuer struct {
 	cfg Config
 }
 
-// NewIssuer returns an Issuer using the given configuration with defaults
-// applied.
 func NewIssuer(cfg Config) *Issuer {
 	return &Issuer{cfg: cfg.withDefaults()}
 }
 
-// Issue mints a new access and refresh token pair for userID at now. The
-// returned RefreshToken is the session record to persist; it is not stored
-// here, so callers decide in which transaction it belongs.
 func (i *Issuer) Issue(userID ID, meta RequestMeta, now time.Time) (*Session, *RefreshToken, error) {
 	accessExpiresAt := now.Add(i.cfg.AccessTTL)
 	accessToken, _, err := i.sign(userID, KindAccess, i.cfg.AccessSecret, accessExpiresAt, now)
@@ -119,9 +98,6 @@ func (i *Issuer) Issue(userID ID, meta RequestMeta, now time.Time) (*Session, *R
 	return session, stored, nil
 }
 
-// Parse verifies a token of the given kind and returns its claims. Every
-// failure mode, malformed, foreign, tampered, expired or wrong kind, is
-// reported as one of the package sentinels.
 func (i *Issuer) Parse(raw string, kind TokenKind) (*Claims, error) {
 	if raw == "" {
 		return nil, ErrMissingToken
@@ -151,7 +127,6 @@ func (i *Issuer) Parse(raw string, kind TokenKind) (*Claims, error) {
 	return claims, nil
 }
 
-// ParseUserID verifies a token of the given kind and returns its subject.
 func (i *Issuer) ParseUserID(raw string, kind TokenKind) (ID, error) {
 	claims, err := i.Parse(raw, kind)
 	if err != nil {
@@ -173,11 +148,7 @@ func (i *Issuer) sign(userID ID, kind TokenKind, secret string, expiresAt, now t
 			Audience:  jwt.ClaimStrings{i.cfg.Audience},
 			ExpiresAt: jwt.NewNumericDate(expiresAt),
 			IssuedAt:  jwt.NewNumericDate(now),
-			// NotBefore is deliberately left unset: verification has no way to
-			// know the issuer's clock, so a not before claim would only make
-			// tokens unusable on a host whose clock runs behind. Expiry, with
-			// the configured leeway, is the whole lifetime story.
-			ID: jti,
+			ID:        jti,
 		},
 		Kind: kind,
 	}
@@ -189,8 +160,6 @@ func (i *Issuer) sign(userID ID, kind TokenKind, secret string, expiresAt, now t
 	return raw, jti, nil
 }
 
-// parseError collapses the JWT library errors into the package sentinels, so
-// that no caller ever has to import the library to classify a failure.
 func parseError(err error) error {
 	if errors.Is(err, jwt.ErrTokenExpired) {
 		return ErrTokenExpired

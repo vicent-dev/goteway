@@ -6,8 +6,6 @@ import (
 	"gorm.io/gorm"
 )
 
-// Role is the authorization role stored on a user. Roles are not part of the
-// issued tokens, so a role change only applies to tokens issued afterwards.
 type Role string
 
 const (
@@ -17,11 +15,6 @@ const (
 	RoleAdmin Role = "admin"
 )
 
-// User is an account that can authenticate against the gateway.
-//
-// The identifiers below are ULIDs assigned by the service before it stores
-// anything (see id.go), so the primary keys carry no auto increment and no
-// sequence has to exist to be leaked.
 type User struct {
 	ID           ID             `gorm:"type:varchar(26);primaryKey" json:"id"`
 	Email        string         `gorm:"type:varchar(255);uniqueIndex;not null" json:"email"`
@@ -34,19 +27,14 @@ type User struct {
 	DeletedAt    gorm.DeletedAt `gorm:"index" json:"-"`
 }
 
-// VerifyPassword reports whether the plain password matches the stored hash.
 func (u *User) VerifyPassword(plain string) bool {
 	return VerifyPassword(u.PasswordHash, plain)
 }
 
-// CanAuthenticate reports whether the account is allowed to start a session.
 func (u *User) CanAuthenticate() bool {
 	return u != nil && u.IsActive
 }
 
-// RefreshToken is the persisted half of a session: the JWT itself is never
-// stored, only its identifier and its hash, so a database leak cannot be
-// replayed against the gateway.
 type RefreshToken struct {
 	ID            ID         `gorm:"type:varchar(26);primaryKey"`
 	JTI           string     `gorm:"type:varchar(64);uniqueIndex;not null"`
@@ -62,23 +50,19 @@ type RefreshToken struct {
 	DeletedAt     gorm.DeletedAt `gorm:"index"`
 }
 
-// IsRevoked reports whether the token has been rotated or logged out.
 func (t *RefreshToken) IsRevoked() bool {
 	return t.RevokedAt != nil
 }
 
-// IsExpired reports whether the token is past its expiry at now.
 func (t *RefreshToken) IsExpired(now time.Time) bool {
 	return !t.ExpiresAt.After(now)
 }
 
-// Revoke marks the token as unusable, recording the token that replaced it.
 func (t *RefreshToken) Revoke(now time.Time, replacedBy string) {
 	t.RevokedAt = &now
 	t.ReplacedByJTI = replacedBy
 }
 
-// RegistrationToken authorises exactly one account creation.
 type RegistrationToken struct {
 	ID           ID         `gorm:"type:varchar(26);primaryKey"`
 	TokenHash    string     `gorm:"type:varchar(255);uniqueIndex;not null"`
@@ -91,12 +75,10 @@ type RegistrationToken struct {
 	DeletedAt    gorm.DeletedAt `gorm:"index"`
 }
 
-// IsUsed reports whether the token has already authorised a registration.
 func (t *RegistrationToken) IsUsed() bool {
 	return t.UsedAt != nil
 }
 
-// IsExpired reports whether the token is past its expiry at now.
 func (t *RegistrationToken) IsExpired(now time.Time) bool {
 	return !t.ExpiresAt.After(now)
 }

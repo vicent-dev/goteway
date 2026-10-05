@@ -41,10 +41,6 @@ func rateLimiterMiddleware(next http.Handler) http.Handler {
 	})
 }
 
-// authMiddleware guards the proxy with a verified access token.
-//
-// The authentication itself lives in pkg/auth, which decides who the caller is;
-// the gateway only decides how a rejection is rendered.
 func (s *server) authMiddleware(next http.Handler) http.Handler {
 	return auth.RequireAuth(s.authService(), unauthorizedResponse)(next)
 }

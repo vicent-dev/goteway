@@ -12,17 +12,12 @@ import (
 )
 
 const (
-	// minPasswordLength and maxPasswordLength bound what bcrypt accepts; past
-	// 72 bytes bcrypt silently truncates, so the limit is enforced up front.
 	minPasswordLength = 8
 	maxPasswordLength = 72
 
 	maxUsernameLength = 30
 )
 
-// errTokenReused is internal to Refresh: it carries the reuse detection out
-// of the transaction that found it, so the family revocation is not rolled
-// back with it.
 var errTokenReused = errors.New("auth: refresh token already used")
 
 var (
@@ -30,8 +25,6 @@ var (
 	usernamePattern = regexp.MustCompile(`^[a-zA-Z0-9_.-]+$`)
 )
 
-// RegisterInput describes the account to create and the one time token that
-// authorises it.
 type RegisterInput struct {
 	Email             string
 	Username          string
@@ -40,47 +33,34 @@ type RegisterInput struct {
 	RequestMeta       RequestMeta
 }
 
-// LoginInput are the credentials presented to Login.
 type LoginInput struct {
 	Email       string
 	Password    string
 	RequestMeta RequestMeta
 }
 
-// RefreshInput is the refresh token presented to Refresh.
 type RefreshInput struct {
 	RefreshToken string
 	RequestMeta  RequestMeta
 }
 
-// LogoutInput is the refresh token to revoke. It is optional: logging out
-// without a session is a no-op.
 type LogoutInput struct {
 	RefreshToken string
 }
 
-// IssueRegistrationTokenInput describes a token to mint.
 type IssueRegistrationTokenInput struct {
 	IssuedBy string
 	TTL      time.Duration
 }
 
-// Service holds the authentication use cases: it owns the rules, the ports and
-// the token issuer, and nothing about how it is exposed over HTTP.
 type Service struct {
 	cfg    Config
 	store  Store
 	issuer *Issuer
-	// now is swapped in tests to drive expiry and rotation without sleeping.
-	now func() time.Time
-	// newID assigns the identifier of every record the service stores. It is
-	// an injectable port for the same reason now is: it reads the service
-	// clock, so a frozen clock freezes the id timestamps with it.
-	newID func() (ID, error)
+	now    func() time.Time
+	newID  func() (ID, error)
 }
 
-// NewService returns a Service backed by store. A nil issuer is built from
-// cfg, which is what callers that only mint registration tokens want.
 func NewService(cfg Config, store Store, issuer *Issuer) *Service {
 	if issuer == nil {
 		issuer = NewIssuer(cfg)
@@ -91,20 +71,11 @@ func NewService(cfg Config, store Store, issuer *Issuer) *Service {
 		issuer: issuer,
 		now:    time.Now,
 	}
-	// Closed over svc rather than over now, so a test that replaces the clock
-	// also moves the ids it stamps.
+
 	svc.newID = func() (ID, error) { return newID(svc.now()) }
 	return svc
 }
 
-// Register consumes a registration token and creates the account it
-// authorises, then starts a session for it.
-//
-// The whole thing runs in one transaction: a registration either creates the
-// account, burns the token and stores the session, or leaves no trace. That is
-// also what makes a one time token one time, since ConsumeRegistrationToken
-// decides the race inside the database rather than in a read followed by a
-// write.
 func (s *Service) Register(ctx context.Context, in RegisterInput) (*Session, error) {
 	email, err := normalizeEmail(in.Email)
 	if err != nil {
@@ -154,8 +125,6 @@ func (s *Service) Register(ctx context.Context, in RegisterInput) (*Session, err
 			return err
 		}
 
-		// The identifier is minted here rather than by the database, which is
-		// what keeps it out of a sequence a client could count.
 		id, err := s.newID()
 		if err != nil {
 			return err
@@ -194,10 +163,6 @@ func (s *Service) Register(ctx context.Context, in RegisterInput) (*Session, err
 	return session, nil
 }
 
-// Login verifies credentials and starts a session.
-//
-// An unknown email and a wrong password return the same error on purpose: a
-// different one would turn login into an account enumeration oracle.
 func (s *Service) Login(ctx context.Context, in LoginInput) (*Session, error) {
 	email, err := normalizeEmail(in.Email)
 	if err != nil {
@@ -230,12 +195,6 @@ func (s *Service) Login(ctx context.Context, in LoginInput) (*Session, error) {
 	return session, nil
 }
 
-// Refresh rotates a refresh token, revoking the presented one and returning a
-// new pair.
-//
-// Presenting a token that was already rotated means either a replay or a stolen
-// token. Since the gateway cannot tell which, it answers both the same way: the
-// user's remaining sessions are revoked and ErrTokenReused is returned.
 func (s *Service) Refresh(ctx context.Context, in RefreshInput) (*Session, error) {
 	raw := strings.TrimSpace(in.RefreshToken)
 	if raw == "" {
@@ -274,7 +233,6 @@ func (s *Service) Refresh(ctx context.Context, in RefreshInput) (*Session, error
 		return nil, ErrInvalidToken
 	}
 
-	// A disabled account keeps its accounts but loses its sessions.
 	u, err := s.store.ByID(ctx, subject)
 	if err != nil {
 		if errors.Is(err, repo.ErrNotFound) {
@@ -309,8 +267,6 @@ func (s *Service) Refresh(ctx context.Context, in RefreshInput) (*Session, error
 		return tx.UpdateRefreshToken(ctx, current)
 	})
 	if errors.Is(err, errTokenReused) {
-		// Lost a rotation race: another request already consumed this token,
-		// so treat it as a replay of the user's token.
 		return nil, s.revokeFamily(ctx, stored.UserID, now)
 	}
 	if err != nil {
@@ -320,9 +276,6 @@ func (s *Service) Refresh(ctx context.Context, in RefreshInput) (*Session, error
 	return session, nil
 }
 
-// revokeFamily drops every session a user still holds and reports reuse. It
-// runs outside any transaction, because the transaction that discovered the
-// reuse is rolled back.
 func (s *Service) revokeFamily(ctx context.Context, userID ID, now time.Time) error {
 	if err := s.store.RevokeAllByUser(ctx, userID, now); err != nil {
 		return err
@@ -330,8 +283,6 @@ func (s *Service) revokeFamily(ctx context.Context, userID ID, now time.Time) er
 	return ErrTokenReused
 }
 
-// Logout revokes the given refresh token. It is idempotent: revoking an
-// already revoked token, or logging out without one, is not an error.
 func (s *Service) Logout(ctx context.Context, in LogoutInput) error {
 	raw := strings.TrimSpace(in.RefreshToken)
 	if raw == "" {
@@ -362,8 +313,6 @@ func (s *Service) Logout(ctx context.Context, in LogoutInput) error {
 	return s.store.UpdateRefreshToken(ctx, stored)
 }
 
-// IssueRegistrationToken mints a one time token that authorises a single
-// registration, and returns the raw value, which is never recoverable later.
 func (s *Service) IssueRegistrationToken(ctx context.Context, in IssueRegistrationTokenInput) (string, error) {
 	ttl := in.TTL
 	if ttl <= 0 {
@@ -392,13 +341,6 @@ func (s *Service) IssueRegistrationToken(ctx context.Context, in IssueRegistrati
 	return raw, nil
 }
 
-// Authenticate verifies an access token and returns the caller it identifies.
-// It hits no storage: an access token is its own proof.
-//
-// Expiry is decided here, against the service clock, rather than left to the
-// parser. The parser validates against the process clock, which a test cannot
-// move, so relying on it alone makes the lifetime of a token untestable and
-// leaves s.now free to disagree with what actually happened.
 func (s *Service) Authenticate(bearer string) (*Principal, error) {
 	claims, err := s.issuer.Parse(bearer, KindAccess)
 	if err != nil {
@@ -421,8 +363,6 @@ func (s *Service) Authenticate(bearer string) (*Principal, error) {
 	}, nil
 }
 
-// issue mints a session and persists its refresh token through store, which
-// may be a transactional one.
 func (s *Service) issue(ctx context.Context, store Store, userID ID, meta RequestMeta, now time.Time) (*Session, *RefreshToken, error) {
 	session, refresh, err := s.issuer.Issue(userID, meta, now)
 	if err != nil {
@@ -432,9 +372,7 @@ func (s *Service) issue(ctx context.Context, store Store, userID ID, meta Reques
 	if err != nil {
 		return nil, nil, err
 	}
-	// The issuer fills in everything the token itself carries, including the
-	// jti the session is known by; the row it becomes gets its identity here,
-	// on the way into the store.
+
 	refresh.ID = id
 	if err := store.CreateRefreshToken(ctx, refresh); err != nil {
 		return nil, nil, err

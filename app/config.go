@@ -33,12 +33,6 @@ type ServerConfig struct {
 	KeyFile  string `yaml:"key_file"`
 }
 
-// RedisConfig is the cache backend configuration.
-//
-// Username and Password authenticate the client, and are empty against a redis
-// without authentication. DB is the database index, whose zero value is the
-// intended default rather than an unset one, so none of the three are defaulted
-// in withDefaults.
 type RedisConfig struct {
 	Host     string `yaml:"host"`
 	Port     string `yaml:"port"`
@@ -47,12 +41,10 @@ type RedisConfig struct {
 	DB       int    `yaml:"db"`
 }
 
-// Addr renders the redis server address.
 func (c RedisConfig) Addr() string {
 	return net.JoinHostPort(c.Host, c.Port)
 }
 
-// DBConfig is the relational store configuration.
 type DBConfig struct {
 	Host     string `yaml:"host"`
 	Port     string `yaml:"port"`
@@ -64,7 +56,6 @@ type DBConfig struct {
 	MaxIdle  int    `yaml:"max_idle"`
 }
 
-// DSN renders the postgres connection string.
 func (c DBConfig) DSN() string {
 	return fmt.Sprintf("host=%s port=%s user=%s password=%s dbname=%s sslmode=%s",
 		c.Host,
@@ -76,8 +67,6 @@ func (c DBConfig) DSN() string {
 	)
 }
 
-// AuthConfig is the yaml shape of the auth domain configuration. It is mapped
-// to auth.Config, which is what the domain actually consumes.
 type AuthConfig struct {
 	AccessSecret         string        `yaml:"access_secret"`
 	RefreshSecret        string        `yaml:"refresh_secret"`
@@ -90,7 +79,6 @@ type AuthConfig struct {
 	ClockSkew            time.Duration `yaml:"clock_skew"`
 }
 
-// Config is the whole gateway configuration.
 type Config struct {
 	Server   ServerConfig   `yaml:"server"`
 	Redis    RedisConfig    `yaml:"redis"`
@@ -99,14 +87,11 @@ type Config struct {
 	Services ServicesConfig `yaml:"services"`
 }
 
-// ServicesConfig are the upstreams the gateway proxies to.
 type ServicesConfig struct {
 	Internal []Upstream `yaml:"internal"`
 	External []Upstream `yaml:"external"`
 }
 
-// AuthConfig maps the yaml section to the auth domain configuration. Auth
-// defaults live in auth.Config, not here.
 func (c Config) AuthConfig() auth.Config {
 	return auth.Config{
 		AccessSecret:         c.Auth.AccessSecret,
@@ -157,9 +142,6 @@ func (c Config) withDefaults() Config {
 	return c
 }
 
-// LoadConfig reads the embedded configuration file, expanding environment
-// variables and applying defaults. It is exported so that admin commands share
-// exactly the same configuration as the server.
 func LoadConfig() (*Config, error) {
 	// Load .env file if present (non-fatal)
 	if err := godotenv.Load(); err != nil {
@@ -177,8 +159,6 @@ func LoadConfig() (*Config, error) {
 	return &c, nil
 }
 
-// TLSEnabled reports whether the server should expose TLS. TLS is enabled for
-// any environment other than "local" or "test".
 func (c Config) TLSEnabled() bool {
 	env := strings.ToLower(strings.TrimSpace(c.Server.Env))
 	if env == "local" || env == "test" {
@@ -187,9 +167,6 @@ func (c Config) TLSEnabled() bool {
 	return true
 }
 
-// envRef matches ${VAR} and ${VAR:-default}. Anything else, like a nested
-// expansion, is left untouched so a typo shows up in the loaded configuration
-// instead of silently becoming empty.
 var envRef = regexp.MustCompile(`\$\{([A-Za-z_][A-Za-z0-9_]*)(?::-(.*?))?\}`)
 
 // expandEnv resolves environment variables in the configuration, falling back to
