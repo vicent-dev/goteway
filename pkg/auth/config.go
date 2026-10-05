@@ -14,24 +14,17 @@ const (
 // It is built by the configuration layer and never read from the environment
 // here, so the domain stays testable.
 type Config struct {
-	// AccessSecret and RefreshSecret sign the two token kinds. They must
-	// differ, otherwise a refresh token would validate as an access token.
-	AccessSecret  string
-	RefreshSecret string
-	// AccessTTL, RefreshTTL and RegistrationTokenTTL bound token lifetimes.
+	AccessSecret         string
+	RefreshSecret        string
 	AccessTTL            time.Duration
 	RefreshTTL           time.Duration
 	RegistrationTokenTTL time.Duration
-	// Issuer and Audience are checked on every verification.
-	Issuer   string
-	Audience string
-	// BcryptCost is the cost of new password hashes.
-	BcryptCost int
-	// ClockSkew is the leeway allowed on not before and expiry checks.
-	ClockSkew time.Duration
+	Issuer               string
+	Audience             string
+	BcryptCost           int
+	ClockSkew            time.Duration
 }
 
-// withDefaults returns a copy with every unset field filled in.
 func (c Config) withDefaults() Config {
 	if c.AccessTTL == 0 {
 		c.AccessTTL = 15 * time.Minute
@@ -57,8 +50,6 @@ func (c Config) withDefaults() Config {
 	return c
 }
 
-// Validate reports whether the configuration can issue tokens at all. Failing
-// fast at startup beats signing tokens nobody can verify.
 func (c Config) Validate() error {
 	switch {
 	case c.AccessSecret == "":

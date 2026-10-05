@@ -413,7 +413,7 @@ func TestClient_InternalWithAPrincipal(t *testing.T) {
 
 	req, err := http.NewRequest("GET", "http://gateway/admin/users", nil)
 	require.NoError(t, err)
-	ctx := auth.WithPrincipal(context.Background(), &auth.Principal{UserID: 7})
+	ctx := auth.WithPrincipal(context.Background(), &auth.Principal{UserID: "01HQZX0000000000000000000A"})
 
 	call, err := client.Request(ctx, req)
 

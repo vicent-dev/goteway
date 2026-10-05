@@ -2,6 +2,7 @@ package auth
 
 import (
 	"context"
+	"errors"
 	"time"
 
 	"gorm.io/gorm"
@@ -19,7 +20,6 @@ type GormStore struct {
 	regToken     *repo.GormRepository[RegistrationToken]
 }
 
-// NewGormStore returns a Store backed by db.
 func NewGormStore(db *gorm.DB) *GormStore {
 	return &GormStore{
 		db:           db,
@@ -29,17 +29,14 @@ func NewGormStore(db *gorm.DB) *GormStore {
 	}
 }
 
-// Models returns every entity owned by this package.
 func Models() []any {
 	return []any{&User{}, &RefreshToken{}, &RegistrationToken{}}
 }
 
-// Migrate creates or updates the tables backing the auth domain.
 func Migrate(db *gorm.DB) error {
 	return db.AutoMigrate(Models()...)
 }
 
-// WithinTx runs fn in a transaction, giving it a Store bound to it.
 func (s *GormStore) WithinTx(ctx context.Context, fn func(Store) error) error {
 	return s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		return fn(NewGormStore(tx))
@@ -47,6 +44,9 @@ func (s *GormStore) WithinTx(ctx context.Context, fn func(Store) error) error {
 }
 
 func (s *GormStore) CreateUser(ctx context.Context, u *User) error {
+	if err := requireID(u.ID); err != nil {
+		return err
+	}
 	return s.users.Create(ctx, u)
 }
 
@@ -58,15 +58,17 @@ func (s *GormStore) ByEmail(ctx context.Context, email string) (*User, error) {
 	return &u, nil
 }
 
-func (s *GormStore) ByID(ctx context.Context, id uint) (*User, error) {
-	return s.users.GetByID(ctx, id)
+func (s *GormStore) ByID(ctx context.Context, id ID) (*User, error) {
+	return s.users.GetByID(ctx, id.String())
 }
 
 func (s *GormStore) CreateRefreshToken(ctx context.Context, rt *RefreshToken) error {
+	if err := requireID(rt.ID); err != nil {
+		return err
+	}
 	return s.refreshToken.Create(ctx, rt)
 }
 
-// ByJTI returns the stored session identified by jti.
 func (s *GormStore) ByJTI(ctx context.Context, jti string) (*RefreshToken, error) {
 	var rt RefreshToken
 	if err := s.refreshToken.DB().WithContext(ctx).Where("jti = ?", jti).First(&rt).Error; err != nil {
@@ -75,12 +77,11 @@ func (s *GormStore) ByJTI(ctx context.Context, jti string) (*RefreshToken, error
 	return &rt, nil
 }
 
-// UpdateRefreshToken persists a session, typically to record a rotation.
 func (s *GormStore) UpdateRefreshToken(ctx context.Context, rt *RefreshToken) error {
 	return s.refreshToken.Update(ctx, rt)
 }
 
-func (s *GormStore) RevokeAllByUser(ctx context.Context, userID uint, at time.Time) error {
+func (s *GormStore) RevokeAllByUser(ctx context.Context, userID ID, at time.Time) error {
 	return s.refreshToken.DB().WithContext(ctx).
 		Model(&RefreshToken{}).
 		Where("user_id = ? AND revoked_at IS NULL", userID).
@@ -88,11 +89,12 @@ func (s *GormStore) RevokeAllByUser(ctx context.Context, userID uint, at time.Ti
 }
 
 func (s *GormStore) CreateRegistrationToken(ctx context.Context, t *RegistrationToken) error {
+	if err := requireID(t.ID); err != nil {
+		return err
+	}
 	return s.regToken.Create(ctx, t)
 }
 
-// ByTokenHash looks a registration token up by the hash of its raw value, the
-// raw value itself never being stored.
 func (s *GormStore) ByTokenHash(ctx context.Context, hash string) (*RegistrationToken, error) {
 	var t RegistrationToken
 	if err := s.regToken.DB().WithContext(ctx).Where("token_hash = ?", hash).First(&t).Error; err != nil {
@@ -101,10 +103,7 @@ func (s *GormStore) ByTokenHash(ctx context.Context, hash string) (*Registration
 	return &t, nil
 }
 
-// ConsumeRegistrationToken marks a registration token as used in a single
-// conditional statement, so the winner of a race is the only caller that gets
-// true.
-func (s *GormStore) ConsumeRegistrationToken(ctx context.Context, id uint, usedBy uint, at time.Time) (bool, error) {
+func (s *GormStore) ConsumeRegistrationToken(ctx context.Context, id ID, usedBy ID, at time.Time) (bool, error) {
 	result := s.regToken.DB().WithContext(ctx).
 		Model(&RegistrationToken{}).
 		Where("id = ? AND used_at IS NULL", id).
@@ -113,4 +112,13 @@ func (s *GormStore) ConsumeRegistrationToken(ctx context.Context, id uint, usedB
 		return false, result.Error
 	}
 	return result.RowsAffected == 1, nil
+}
+
+var errMissingID = errors.New("auth: stored a record without an id")
+
+func requireID(id ID) error {
+	if id == "" {
+		return errMissingID
+	}
+	return nil
 }

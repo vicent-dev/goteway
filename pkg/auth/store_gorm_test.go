@@ -3,6 +3,7 @@ package auth
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 	"time"
 
@@ -28,6 +29,18 @@ func newTestGormStore(t *testing.T) *GormStore {
 	return NewGormStore(db)
 }
 
+// newRowID returns a fresh valid identifier, so each row a test inserts has a
+// primary key of its own: the service is what assigns them, and the store
+// refuses anything that arrives without one.
+func newRowID(t *testing.T) ID {
+	t.Helper()
+
+	id, err := newID(testNow)
+	require.NoError(t, err)
+
+	return id
+}
+
 func TestMigrateCreatesTheAuthTables(t *testing.T) {
 	db, err := gorm.Open(sqlite.Open("file::memory:"), &gorm.Config{Logger: logger.Discard})
 	require.NoError(t, err)
@@ -39,13 +52,51 @@ func TestMigrateCreatesTheAuthTables(t *testing.T) {
 	assert.True(t, db.Migrator().HasTable(&RegistrationToken{}))
 }
 
+func TestMigrateStoresIdentifiersAsText(t *testing.T) {
+	// Guards the column types themselves. A driver is free to pick something
+	// else for a Go string, and an identifier stored as an integer would bring
+	// back the enumeration this scheme exists to remove — silently, since
+	// everything would still round-trip.
+	db, err := gorm.Open(sqlite.Open("file::memory:"), &gorm.Config{Logger: logger.Discard})
+	require.NoError(t, err)
+	require.NoError(t, Migrate(db))
+
+	models := map[string]any{
+		"User":              &User{},
+		"RefreshToken":      &RefreshToken{},
+		"RegistrationToken": &RegistrationToken{},
+	}
+	textual := map[string][]string{
+		"User":              {"id"},
+		"RefreshToken":      {"id", "user_id"},
+		"RegistrationToken": {"id", "used_by_user_id"},
+	}
+
+	for name, model := range models {
+		columns, err := db.Migrator().ColumnTypes(model)
+		require.NoError(t, err)
+
+		byName := make(map[string]string, len(columns))
+		for _, column := range columns {
+			byName[column.Name()] = strings.ToLower(column.DatabaseTypeName())
+		}
+
+		for _, column := range textual[name] {
+			declared, ok := byName[column]
+			require.True(t, ok, "%s should have a %s column", name, column)
+			assert.NotContains(t, declared, "int",
+				"%s.%s must not be an integer column, got %q", name, column, declared)
+		}
+	}
+}
+
 func TestGormStoreUserLookups(t *testing.T) {
 	store := newTestGormStore(t)
 	ctx := context.Background()
 
-	u := &User{Email: "ada@example.com", Username: "ada", PasswordHash: "hash", Role: RoleUser, IsActive: true}
+	u := &User{ID: newRowID(t), Email: "ada@example.com", Username: "ada", PasswordHash: "hash", Role: RoleUser, IsActive: true}
 	require.NoError(t, store.CreateUser(ctx, u))
-	assert.NotZero(t, u.ID)
+	assert.NotEmpty(t, u.ID)
 
 	byEmail, err := store.ByEmail(ctx, "ada@example.com")
 	require.NoError(t, err)
@@ -56,6 +107,20 @@ func TestGormStoreUserLookups(t *testing.T) {
 	assert.Equal(t, "ada@example.com", byID.Email)
 }
 
+func TestGormStoreRefusesARecordWithoutAnID(t *testing.T) {
+	// There is no sequence to fall back on, so an unidentified row would be
+	// stored under the empty string and collide with the next one.
+	store := newTestGormStore(t)
+	ctx := context.Background()
+
+	assert.ErrorIs(t, store.CreateUser(ctx, &User{Email: "ada@example.com"}), errMissingID)
+	assert.ErrorIs(t, store.CreateRefreshToken(ctx, &RefreshToken{JTI: "jti-1"}), errMissingID)
+	assert.ErrorIs(t, store.CreateRegistrationToken(ctx, &RegistrationToken{TokenHash: "hash"}), errMissingID)
+
+	_, err := store.ByEmail(ctx, "ada@example.com")
+	assert.ErrorIs(t, err, repo.ErrNotFound, "nothing is written")
+}
+
 func TestGormStoreMissingRecordsReportRepoErrNotFound(t *testing.T) {
 	store := newTestGormStore(t)
 	ctx := context.Background()
@@ -63,7 +128,7 @@ func TestGormStoreMissingRecordsReportRepoErrNotFound(t *testing.T) {
 	_, err := store.ByEmail(ctx, "ghost@example.com")
 	assert.ErrorIs(t, err, repo.ErrNotFound)
 
-	_, err = store.ByID(ctx, 404)
+	_, err = store.ByID(ctx, testID())
 	assert.ErrorIs(t, err, repo.ErrNotFound)
 
 	_, err = store.ByJTI(ctx, "unknown-jti")
@@ -79,8 +144,9 @@ func TestGormStoreRefreshTokenLifecycle(t *testing.T) {
 	now := time.Now().Truncate(time.Second)
 
 	rt := &RefreshToken{
+		ID:        newRowID(t),
 		JTI:       "jti-1",
-		UserID:    7,
+		UserID:    testID(),
 		TokenHash: "hash-1",
 		ExpiresAt: now.Add(time.Hour),
 		UserAgent: "curl",
@@ -90,7 +156,8 @@ func TestGormStoreRefreshTokenLifecycle(t *testing.T) {
 
 	stored, err := store.ByJTI(ctx, "jti-1")
 	require.NoError(t, err)
-	assert.Equal(t, uint(7), stored.UserID)
+	assert.Equal(t, testID(), stored.UserID)
+	assert.Equal(t, rt.ID, stored.ID)
 	assert.False(t, stored.IsRevoked())
 
 	stored.Revoke(now, "jti-2")
@@ -106,26 +173,27 @@ func TestGormStoreRevokeAllByUser(t *testing.T) {
 	store := newTestGormStore(t)
 	ctx := context.Background()
 	now := time.Now().Truncate(time.Second)
+	first, second := testID(), otherID()
 
 	for _, rt := range []*RefreshToken{
-		{JTI: "u1-a", UserID: 1, ExpiresAt: now.Add(time.Hour)},
-		{JTI: "u1-b", UserID: 1, ExpiresAt: now.Add(time.Hour)},
-		{JTI: "u2-a", UserID: 2, ExpiresAt: now.Add(time.Hour)},
+		{ID: newRowID(t), JTI: "u1-a", UserID: first, ExpiresAt: now.Add(time.Hour)},
+		{ID: newRowID(t), JTI: "u1-b", UserID: first, ExpiresAt: now.Add(time.Hour)},
+		{ID: newRowID(t), JTI: "u2-a", UserID: second, ExpiresAt: now.Add(time.Hour)},
 	} {
 		require.NoError(t, store.CreateRefreshToken(ctx, rt))
 	}
 
-	require.NoError(t, store.RevokeAllByUser(ctx, 1, now))
+	require.NoError(t, store.RevokeAllByUser(ctx, first, now))
 
-	first, err := store.ByJTI(ctx, "u1-a")
+	first_, err := store.ByJTI(ctx, "u1-a")
 	require.NoError(t, err)
-	second, err := store.ByJTI(ctx, "u1-b")
+	second_, err := store.ByJTI(ctx, "u1-b")
 	require.NoError(t, err)
 	other, err := store.ByJTI(ctx, "u2-a")
 	require.NoError(t, err)
 
-	assert.True(t, first.IsRevoked())
-	assert.True(t, second.IsRevoked())
+	assert.True(t, first_.IsRevoked())
+	assert.True(t, second_.IsRevoked())
 	assert.False(t, other.IsRevoked(), "another user's session is untouched")
 }
 
@@ -134,15 +202,15 @@ func TestGormStoreConsumeRegistrationTokenIsAtomic(t *testing.T) {
 	ctx := context.Background()
 	now := time.Now().Truncate(time.Second)
 
-	token := &RegistrationToken{TokenHash: "hash", IssuedBy: "admin", ExpiresAt: now.Add(time.Hour)}
+	token := &RegistrationToken{ID: newRowID(t), TokenHash: "hash", IssuedBy: "admin", ExpiresAt: now.Add(time.Hour)}
 	require.NoError(t, store.CreateRegistrationToken(ctx, token))
 
-	consumed, err := store.ConsumeRegistrationToken(ctx, token.ID, 42, now)
+	consumed, err := store.ConsumeRegistrationToken(ctx, token.ID, testID(), now)
 	require.NoError(t, err)
 	assert.True(t, consumed)
 
 	// A second registration racing for the same token loses, and says so.
-	consumed, err = store.ConsumeRegistrationToken(ctx, token.ID, 43, now)
+	consumed, err = store.ConsumeRegistrationToken(ctx, token.ID, otherID(), now)
 	require.NoError(t, err)
 	assert.False(t, consumed)
 
@@ -151,7 +219,7 @@ func TestGormStoreConsumeRegistrationTokenIsAtomic(t *testing.T) {
 	require.NotNil(t, stored.UsedAt)
 	assert.True(t, now.Equal(*stored.UsedAt), "used_at is %v, want %v", stored.UsedAt, now)
 	require.NotNil(t, stored.UsedByUserID)
-	assert.Equal(t, uint(42), *stored.UsedByUserID, "the first caller keeps the attribution")
+	assert.Equal(t, testID(), *stored.UsedByUserID, "the first caller keeps the attribution")
 }
 
 func TestGormStoreConsumeUnknownRegistrationToken(t *testing.T) {
@@ -159,7 +227,7 @@ func TestGormStoreConsumeUnknownRegistrationToken(t *testing.T) {
 
 	// A conditional update that matches nothing is not an error: the token is
 	// simply not consumable, whether it is gone or already taken.
-	consumed, err := store.ConsumeRegistrationToken(context.Background(), 999, 1, time.Now())
+	consumed, err := store.ConsumeRegistrationToken(context.Background(), newRowID(t), testID(), time.Now())
 
 	assert.NoError(t, err)
 	assert.False(t, consumed)
@@ -170,10 +238,10 @@ func TestGormStoreWithinTxCommits(t *testing.T) {
 	ctx := context.Background()
 
 	err := store.WithinTx(ctx, func(tx Store) error {
-		if err := tx.CreateUser(ctx, &User{Email: "ada@example.com", IsActive: true}); err != nil {
+		if err := tx.CreateUser(ctx, &User{ID: newRowID(t), Email: "ada@example.com", IsActive: true}); err != nil {
 			return err
 		}
-		return tx.CreateRefreshToken(ctx, &RefreshToken{JTI: "jti-1", UserID: 1, ExpiresAt: time.Now().Add(time.Hour)})
+		return tx.CreateRefreshToken(ctx, &RefreshToken{ID: newRowID(t), JTI: "jti-1", UserID: testID(), ExpiresAt: time.Now().Add(time.Hour)})
 	})
 
 	require.NoError(t, err)
@@ -190,10 +258,10 @@ func TestGormStoreWithinTxRollsBack(t *testing.T) {
 	boom := errors.New("something went wrong")
 
 	err := store.WithinTx(ctx, func(tx Store) error {
-		if err := tx.CreateUser(ctx, &User{Email: "ada@example.com", IsActive: true}); err != nil {
+		if err := tx.CreateUser(ctx, &User{ID: newRowID(t), Email: "ada@example.com", IsActive: true}); err != nil {
 			return err
 		}
-		if err := tx.CreateRefreshToken(ctx, &RefreshToken{JTI: "jti-1", UserID: 1, ExpiresAt: time.Now().Add(time.Hour)}); err != nil {
+		if err := tx.CreateRefreshToken(ctx, &RefreshToken{ID: newRowID(t), JTI: "jti-1", UserID: testID(), ExpiresAt: time.Now().Add(time.Hour)}); err != nil {
 			return err
 		}
 		return boom

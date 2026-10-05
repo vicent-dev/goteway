@@ -9,13 +9,6 @@ import (
 	"goteway/pkg/log"
 )
 
-// The handlers below only translate between HTTP and the auth domain: decode,
-// delegate, render. Every rule about what is valid lives in pkg/auth and comes
-// back as one of its sentinel errors, which writeAuthError maps to a status.
-//
-// Each factory builds the auth service before returning its handler, the same
-// way defaultRouteHandler builds the response cache and the client.
-
 type registerRequest struct {
 	Email             string `json:"email"`
 	Username          string `json:"username"`

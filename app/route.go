@@ -17,10 +17,6 @@ func (s *server) routes() {
 	s.r.Use(loggingMiddleware)
 	s.r.Use(rateLimiterMiddleware)
 
-	// health handler. Registered on the root router ahead of the authenticated
-	// catch-all, because a probe cannot hold a bearer token, and ahead of the
-	// service matching too: /health never reaches pkg/request, so it answers even
-	// with no services configured at all.
 	health := healthHandler()
 	s.r.HandleFunc("/health", health).Methods("GET", "HEAD")
 	s.r.HandleFunc("/health/", health).Methods("GET", "HEAD")
@@ -90,13 +86,6 @@ func copyUpstreamHeaders(dst, src http.Header) {
 	}
 }
 
-// writeRequestError maps a proxy error to the status that describes it, the
-// same way writeAuthError does for the auth domain: the request package names
-// what went wrong and the gateway decides how it is shown.
-//
-// Nothing here echoes err.Error(). The proxy errors carry upstream hosts and
-// dial failures, so the message a client gets is a fixed one per class of
-// failure, and the real cause stays in the log.
 func writeRequestError(w http.ResponseWriter, r *http.Request, err error) {
 	switch {
 	case errors.Is(err, request.ErrAccessDenied):

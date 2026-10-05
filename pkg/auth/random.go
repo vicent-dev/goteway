@@ -9,19 +9,17 @@ import (
 // tokenBytes is the entropy of an opaque registration token.
 const tokenBytes = 32
 
-// jtiBytes is the entropy of a JWT ID.
-const jtiBytes = 16
-
 // NewOpaqueToken returns a random token safe to hand to a human. It is hex
 // encoded, so it survives query strings, headers and copy and paste.
+//
+// It stays 32 bytes of crypto/rand even though every other identifier in this
+// package is a ULID, because this value is a credential rather than a label:
+// it authorises exactly one account creation, and a ULID is a timestamp plus
+// monotonic entropy, which is a shape an attacker could walk forwards from the
+// clock alone. Only its hash is stored, and only the record it names carries a
+// ULID.
 func NewOpaqueToken() (string, error) {
 	return randomHex(tokenBytes)
-}
-
-// NewJTI returns a random JWT ID, used to identify a single token both in the
-// token itself and in the persisted session.
-func NewJTI() (string, error) {
-	return randomHex(jtiBytes)
 }
 
 func randomHex(n int) (string, error) {

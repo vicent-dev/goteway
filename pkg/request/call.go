@@ -26,20 +26,12 @@ type Call struct {
 	isInternal bool
 	requestUrl string
 	request    *http.Request
-	// body is the upstream body, captured once when the response is attached.
-	// It is the source of truth for the cache value and the source the handler
-	// reads, which is why it exists: the cache is written from a goroutine while
-	// the handler is still copying the response to the client, and sharing a
-	// single reader between them is a race.
+
 	body []byte
-	// Response is nil until the upstream answers, which is also how a cache hit
-	// is detected.
+
 	Response *http.Response
 }
 
-// NewCall matches the request against the configured services and derives its
-// cache key. It reads the caller's body and hands it back, so the upstream
-// request can still be built from the same request afterwards.
 func NewCall(r *http.Request, servicesConfig ServicesConfig) (*Call, error) {
 	sc, isInternal := findServiceConfigForUri(r.URL.Path, servicesConfig)
 
@@ -49,11 +41,6 @@ func NewCall(r *http.Request, servicesConfig ServicesConfig) (*Call, error) {
 
 	requestUrl := strings.Replace(r.URL.Path[1:], sc.Path, sc.Host, -1)
 
-	// r.URL.Path never carries the query, so it has to be appended by hand or
-	// the upstream is asked a different question than the client asked. The
-	// fingerprint below hashes the whole *url.URL, query included, so before
-	// this the gateway kept one cache entry per query string for requests the
-	// upstream could not tell apart.
 	if r.URL.RawQuery != "" {
 		requestUrl += "?" + r.URL.RawQuery
 	}
@@ -149,9 +136,6 @@ func (c *Call) Key() string {
 	return c.id
 }
 
-// validStatusCode is the range ResponseWriter.WriteHeader accepts. It is checked
-// against a decoded payload rather than trusted, so that the handler can write
-// the cached status without having to defend itself.
 func validStatusCode(code int) bool {
 	return code >= 100 && code <= 999
 }
@@ -225,9 +209,7 @@ func (c *Call) attachResponse(resp *http.Response) error {
 
 	c.Response = resp
 	c.body = body
-	// The handler gets its own reader over the same bytes: reading resp.Body
-	// directly would be a second reader over a body that has already been
-	// drained and closed.
+
 	c.Response.Body = io.NopCloser(bytes.NewReader(body))
 
 	return nil

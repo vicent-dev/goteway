@@ -17,17 +17,11 @@ func TestNewOpaqueToken(t *testing.T) {
 	assert.Len(t, first, tokenBytes*2)
 	assert.NotEqual(t, first, second)
 	assert.Regexp(t, "^[0-9a-f]+$", first)
-}
 
-func TestNewJTI(t *testing.T) {
-	first, err := NewJTI()
-	require.NoError(t, err)
-	second, err := NewJTI()
-	require.NoError(t, err)
-
-	// 16 bytes hex encoded, short enough for the varchar(64) column.
-	assert.Len(t, first, jtiBytes*2)
-	assert.NotEqual(t, first, second)
+	// It is a credential, so it must not have become a guessable identifier the
+	// way every id in this package did. See ID and NewOpaqueToken.
+	_, err = parseID(first)
+	assert.Error(t, err, "a registration token is not a ULID")
 }
 
 func TestHashTokenIsStableSHA256(t *testing.T) {

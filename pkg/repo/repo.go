@@ -9,17 +9,12 @@ import (
 	"errors"
 )
 
-// ErrNotFound is returned by every lookup that matches no record. Adapters
-// translate driver specific errors into this sentinel so callers can check it
-// with errors.Is without importing the driver.
 var ErrNotFound = errors.New("repo: record not found")
 
-// Repository is the generic CRUD contract implemented by GormRepository.
-// Lookups report ErrNotFound when nothing matches.
 type Repository[T any] interface {
 	Create(ctx context.Context, entity *T) error
-	GetByID(ctx context.Context, id uint) (*T, error)
+	GetByID(ctx context.Context, id string) (*T, error)
 	Update(ctx context.Context, entity *T) error
-	Delete(ctx context.Context, id uint) error
+	Delete(ctx context.Context, id string) error
 	FindAll(ctx context.Context) ([]T, error)
 }

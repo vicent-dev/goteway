@@ -11,8 +11,6 @@ import (
 	"goteway/pkg/auth"
 )
 
-// OpenDB dials postgres, sizes the connection pool and migrates the auth
-// tables. It is exported so that admin commands can reuse it.
 func OpenDB(cfg DBConfig) (*gorm.DB, error) {
 	db, err := gorm.Open(postgres.Open(cfg.DSN()), &gorm.Config{
 		Logger: logger.Default.LogMode(logger.Warn),
@@ -35,7 +33,6 @@ func OpenDB(cfg DBConfig) (*gorm.DB, error) {
 	return db, nil
 }
 
-// CloseDB releases the connection pool.
 func CloseDB(ctx context.Context, db *gorm.DB) error {
 	sqlDB, err := db.DB()
 	if err != nil {

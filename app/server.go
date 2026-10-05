@@ -25,8 +25,6 @@ type server struct {
 	httpServer http.Server
 }
 
-// NewServer builds a fully wired gateway: redis for the response cache, postgres
-// for auth persistence, and the auth service on top of both.
 func NewServer() (*server, error) {
 	c, err := LoadConfig()
 	if err != nil {
@@ -35,7 +33,6 @@ func NewServer() (*server, error) {
 	return newServer(c)
 }
 
-// newServer wires a gateway from an already loaded configuration.
 func newServer(c *Config) (*server, error) {
 	s := &server{
 		r: mux.NewRouter(),
@@ -58,12 +55,6 @@ func newServer(c *Config) (*server, error) {
 	return s, nil
 }
 
-// authConfig validates the auth configuration and connects postgres. Failing
-// here, rather than on the first request, is what used to leave the server wired
-// to nothing.
-//
-// It stops there on purpose: the auth service is built by each handler, out of
-// the configuration and the connection this leaves behind.
 func (s *server) authConfig() error {
 	if err := s.c.AuthConfig().Validate(); err != nil {
 		return err
@@ -78,9 +69,6 @@ func (s *server) authConfig() error {
 	return nil
 }
 
-// authService builds the auth domain for a handler. Like the proxy's response
-// cache and client, it is created where it is used, out of the infrastructure
-// the server holds: the service is stateless and the store is a view over s.db.
 func (s *server) authService() *auth.Service {
 	return auth.NewService(s.c.AuthConfig(), auth.NewGormStore(s.db), nil)
 }

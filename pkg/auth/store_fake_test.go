@@ -2,6 +2,7 @@ package auth
 
 import (
 	"context"
+	"errors"
 	"sync"
 	"time"
 
@@ -12,15 +13,19 @@ import (
 // mirrors the real semantics that matter to the domain: not found lookups
 // report repo.ErrNotFound, consumed registration tokens cannot be consumed
 // twice, and WithinTx commits or discards every write.
+//
+// It does not assign identifiers the way the old auto increment columns did:
+// those now come from the service, exactly as they come from a real adapter, so
+// a test that reaches a store directly has to say which id it means.
 type fakeStore struct {
 	mu sync.Mutex
 
-	users        map[uint]*User
+	users        map[ID]*User
 	refreshToken map[string]*RefreshToken
-	regToken     map[uint]*RegistrationToken
-
-	nextUserID uint
-	nextRegID  uint
+	// Keyed by hash, because that is how a presented registration token is
+	// looked up, and because a test holding only the raw value can find the
+	// record it minted without knowing its id.
+	regToken map[string]*RegistrationToken
 
 	// hooks let a test fail a specific call, to exercise rollback and error
 	// propagation.
@@ -39,11 +44,9 @@ type fakeStore struct {
 
 func newFakeStore() *fakeStore {
 	return &fakeStore{
-		users:        make(map[uint]*User),
+		users:        make(map[ID]*User),
 		refreshToken: make(map[string]*RefreshToken),
-		regToken:     make(map[uint]*RegistrationToken),
-		nextUserID:   1,
-		nextRegID:    1,
+		regToken:     make(map[string]*RegistrationToken),
 	}
 }
 
@@ -55,8 +58,9 @@ func (s *fakeStore) CreateUser(_ context.Context, u *User) error {
 		return s.failCreateUser
 	}
 
-	u.ID = s.nextUserID
-	s.nextUserID++
+	if u.ID == "" {
+		return errors.New("fakeStore: CreateUser called without an id")
+	}
 	clone := *u
 	s.users[u.ID] = &clone
 	return nil
@@ -85,7 +89,7 @@ func (s *fakeStore) ByEmail(_ context.Context, email string) (*User, error) {
 	return nil, repo.ErrNotFound
 }
 
-func (s *fakeStore) ByID(_ context.Context, id uint) (*User, error) {
+func (s *fakeStore) ByID(_ context.Context, id ID) (*User, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -105,7 +109,9 @@ func (s *fakeStore) CreateRefreshToken(_ context.Context, rt *RefreshToken) erro
 		return s.failCreateRefresh
 	}
 
-	rt.ID = uint(len(s.refreshToken) + 1)
+	if rt.ID == "" {
+		return errors.New("fakeStore: CreateRefreshToken called without an id")
+	}
 	clone := *rt
 	s.refreshToken[rt.JTI] = &clone
 	return nil
@@ -132,7 +138,7 @@ func (s *fakeStore) UpdateRefreshToken(_ context.Context, rt *RefreshToken) erro
 	return nil
 }
 
-func (s *fakeStore) RevokeAllByUser(_ context.Context, userID uint, at time.Time) error {
+func (s *fakeStore) RevokeAllByUser(_ context.Context, userID ID, at time.Time) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -156,10 +162,11 @@ func (s *fakeStore) CreateRegistrationToken(_ context.Context, t *RegistrationTo
 		return s.failCreateRegToken
 	}
 
-	t.ID = s.nextRegID
-	s.nextRegID++
+	if t.ID == "" {
+		return errors.New("fakeStore: CreateRegistrationToken called without an id")
+	}
 	clone := *t
-	s.regToken[t.ID] = &clone
+	s.regToken[t.TokenHash] = &clone
 	return nil
 }
 
@@ -170,16 +177,15 @@ func (s *fakeStore) ByTokenHash(_ context.Context, hash string) (*RegistrationTo
 	if s.failByTokenHash != nil {
 		return nil, s.failByTokenHash
 	}
-	for _, t := range s.regToken {
-		if t.TokenHash == hash {
-			clone := *t
-			return &clone, nil
-		}
+	t, ok := s.regToken[hash]
+	if !ok {
+		return nil, repo.ErrNotFound
 	}
-	return nil, repo.ErrNotFound
+	clone := *t
+	return &clone, nil
 }
 
-func (s *fakeStore) ConsumeRegistrationToken(_ context.Context, id uint, usedBy uint, at time.Time) (bool, error) {
+func (s *fakeStore) ConsumeRegistrationToken(_ context.Context, id ID, usedBy ID, at time.Time) (bool, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -187,19 +193,23 @@ func (s *fakeStore) ConsumeRegistrationToken(_ context.Context, id uint, usedBy 
 		return false, s.failConsumeRegToken
 	}
 
-	t, ok := s.regToken[id]
-	if !ok {
-		return false, repo.ErrNotFound
-	}
-	if t.IsUsed() {
-		return false, nil
-	}
+	// The port identifies the token by id, so the hash keyed map is searched
+	// for it rather than the other way round.
+	for _, t := range s.regToken {
+		if t.ID != id {
+			continue
+		}
+		if t.IsUsed() {
+			return false, nil
+		}
 
-	used := at
-	userID := usedBy
-	t.UsedAt = &used
-	t.UsedByUserID = &userID
-	return true, nil
+		used := at
+		userID := usedBy
+		t.UsedAt = &used
+		t.UsedByUserID = &userID
+		return true, nil
+	}
+	return false, repo.ErrNotFound
 }
 
 func (s *fakeStore) WithinTx(ctx context.Context, fn func(Store) error) error {
@@ -228,9 +238,9 @@ func (s *fakeStore) WithinTx(ctx context.Context, fn func(Store) error) error {
 }
 
 type storeSnapshot struct {
-	users        map[uint]*User
+	users        map[ID]*User
 	refreshToken map[string]*RefreshToken
-	regToken     map[uint]*RegistrationToken
+	regToken     map[string]*RegistrationToken
 }
 
 func (s *fakeStore) snapshot() storeSnapshot {
@@ -238,9 +248,9 @@ func (s *fakeStore) snapshot() storeSnapshot {
 	defer s.mu.Unlock()
 
 	snap := storeSnapshot{
-		users:        make(map[uint]*User, len(s.users)),
+		users:        make(map[ID]*User, len(s.users)),
 		refreshToken: make(map[string]*RefreshToken, len(s.refreshToken)),
-		regToken:     make(map[uint]*RegistrationToken, len(s.regToken)),
+		regToken:     make(map[string]*RegistrationToken, len(s.regToken)),
 	}
 	for id, u := range s.users {
 		clone := *u
@@ -266,11 +276,13 @@ func (s *fakeStore) restoreSnapshot(snap storeSnapshot) {
 	s.regToken = snap.regToken
 }
 
-func (s *fakeStore) registrationToken(id uint) *RegistrationToken {
+// registrationToken returns the stored registration token with the given hash,
+// which is how a test that only holds the raw value names the record it minted.
+func (s *fakeStore) registrationToken(hash string) *RegistrationToken {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	t, ok := s.regToken[id]
+	t, ok := s.regToken[hash]
 	if !ok {
 		return nil
 	}
